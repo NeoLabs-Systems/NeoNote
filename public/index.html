@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>NoteNeo</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#6366f1" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#6366f1" media="(prefers-color-scheme: light)">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NoteNeo">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <script>(function(){var d=document.documentElement;function applyTheme(dark){d.dataset.theme=dark?'dark':'light';}var mq=window.matchMedia('(prefers-color-scheme: dark)');applyTheme(mq.matches);mq.addEventListener('change',function(e){applyTheme(e.matches);});}());</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════ -->
+<!--  APP SHELL                                                 -->
+<!-- ══════════════════════════════════════════════════════════ -->
+<div id="app" class="app-shell view-home">
+
+  <!-- ── Mobile overlay ──────────────────────────────────── -->
+  <div id="mobile-overlay"></div>
+
+  <!-- ════════════════════════════════════════════════════════ -->
+  <!--  SIDEBAR                                                 -->
+  <!-- ════════════════════════════════════════════════════════ -->
+  <aside id="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+        </svg>
+      </div>
+      <span class="sidebar-logo-text">NoteNeo</span>
+    </div>
+
+    <div class="sidebar-compose">
+      <button class="btn-compose" id="btn-new-notebook">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Notebook
+      </button>
+    </div>
+
+    <div class="sidebar-search">
+      <div class="search-wrap">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        <input id="sidebar-search" type="text" placeholder="Search notebooks…" autocomplete="off">
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="nav-item active" data-view="home" id="nav-home">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        All Notebooks
+        <span class="nav-badge" id="nb-count-badge">0</span>
+      </div>
+      <div class="nav-item" data-view="recent" id="nav-recent">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Recent
+      </div>
+      <div class="nav-item" data-view="pinned" id="nav-pinned">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        Pinned
+      </div>
+      <div class="nav-item" data-view="archive" id="nav-archive">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+        Archive
+      </div>
+    </div>
+
+    <div class="sidebar-section" id="tags-section">
+      <div class="sidebar-section-title">Tags</div>
+      <div id="sidebar-tags"></div>
+    </div>
+
+    <div class="sidebar-spacer"></div>
+
+    <div class="sidebar-footer">
+      <button class="sidebar-footer-btn" id="nav-settings">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+      <button class="sidebar-footer-btn" id="btn-logout">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Sign Out
+      </button>
+    </div>
+  </aside>
+
+  <!-- ════════════════════════════════════════════════════════ -->
+  <!--  MAIN CONTENT AREA                                       -->
+  <!-- ════════════════════════════════════════════════════════ -->
+  <main id="main">
+
+    <!-- ── Mobile topbar ─────────────────────────────────── -->
+    <div class="mobile-topbar">
+      <button class="btn-icon" id="btn-menu-toggle">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <span class="mobile-title">NoteNeo</span>
+      <button class="btn-icon" id="btn-mobile-new">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+
+    <!-- ──────────────────────────────────────────────────── -->
+    <!--  NOTEBOOKS GRID VIEW (home / recent / pinned / archive) -->
+    <!-- ──────────────────────────────────────────────────── -->
+    <div id="view-home" class="view-panel active">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title" id="home-title">All Notebooks</h2>
+          <p class="panel-sub" id="home-sub">0 notebooks</p>
+        </div>
+        <div class="panel-actions">
+          <div class="view-toggle" id="nb-view-toggle">
+            <button class="btn-view-mode active" data-mode="grid" title="Grid view">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+            </button>
+            <button class="btn-view-mode" data-mode="list" title="List view">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+          </div>
+          <button class="btn-sm btn-primary" id="btn-new-notebook-2">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New
+          </button>
+        </div>
+      </div>
+      <div id="notebooks-container" class="notebooks-grid">
+        <!-- notebooks rendered here -->
+      </div>
+      <div id="notebooks-empty" class="empty-state" style="display:none">
+        <div class="empty-icon">📓</div>
+        <h3>No notebooks yet</h3>
+        <p>Create your first notebook to start taking notes</p>
+        <button class="btn-sm btn-primary" id="btn-new-notebook-empty">Create Notebook</button>
+      </div>
+    </div>
+
+    <!-- ──────────────────────────────────────────────────── -->
+    <!--  NOTEBOOK PAGES VIEW                                  -->
+    <!-- ──────────────────────────────────────────────────── -->
+    <div id="view-notebook" class="view-panel">
+      <div class="panel-header">
+        <div class="breadcrumb">
+          <button class="btn-back" id="btn-back-home">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span class="nb-icon" id="nb-icon-header">📓</span>
+          <h2 class="panel-title" id="nb-title-header">Notebook</h2>
+        </div>
+        <div class="panel-actions">
+          <button class="btn-sm btn-ghost" id="btn-nb-settings" title="Notebook settings">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          </button>
+          <button class="btn-sm btn-primary" id="btn-new-page">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            New Page
+          </button>
+        </div>
+      </div>
+      <div id="pages-container" class="pages-grid">
+        <!-- pages rendered here -->
+      </div>
+      <div id="pages-empty" class="empty-state" style="display:none">
+        <div class="empty-icon">📄</div>
+        <h3>No pages yet</h3>
+        <p>Add a page to start drawing and writing</p>
+        <button class="btn-sm btn-primary" id="btn-new-page-empty">Add First Page</button>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!--  SETTINGS MODAL                                              -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div class="modal-overlay" id="settings-overlay" style="display:none">
+  <div class="settings-modal">
+    <div class="settings-header">
+      <h2>Settings</h2>
+      <button class="icon-btn" id="settings-close">✕</button>
+    </div>
+    <div class="settings-body">
+      <div class="settings-tabs" id="settings-tab-list">
+        <button class="stab active" data-stab="drawing">Drawing</button>
+        <button class="stab" data-stab="saving">Saving</button>
+        <button class="stab" data-stab="account">Account</button>
+      </div>
+      <div class="settings-content">
+        <!-- Drawing -->
+        <div class="settings-panel active" id="stab-drawing">
+          <div class="settings-section">
+            <h3>Pen</h3>
+            <div class="settings-row">
+              <label>Palm rejection</label>
+              <label class="toggle"><input type="checkbox" id="st-palm"><span class="toggle-sl"></span></label>
+            </div>
+            <div class="settings-row">
+              <label>Pressure sensitivity</label>
+              <label class="toggle"><input type="checkbox" id="st-pressure"><span class="toggle-sl"></span></label>
+            </div>
+            <div class="settings-row">
+              <label>Default pen color</label>
+              <input type="color" id="st-pen-color" value="#000000">
+            </div>
+            <div class="settings-row">
+              <label>Default pen width</label>
+              <div style="display:flex;align-items:center;gap:8px">
+                <input type="range" id="st-pen-width" min="1" max="20" step="0.5" value="2.5" style="width:120px">
+                <span id="st-pen-width-val" style="font-size:.85rem;color:var(--text-3);min-width:24px">2.5</span>
+              </div>
+            </div>
+          </div>
+          <div class="settings-section">
+            <h3>Appearance</h3>
+            <div class="settings-row">
+              <label>Theme</label>
+              <span style="color:var(--text-3);font-size:.85rem">Follows system</span>
+            </div>
+          </div>
+        </div>
+        <!-- Saving -->
+        <div class="settings-panel" id="stab-saving">
+          <div class="settings-section">
+            <h3>Auto-save</h3>
+            <div class="settings-row">
+              <label>Auto-save interval (sec)</label>
+              <input type="number" id="st-autosave" min="2" max="60" value="5" style="width:70px">
+            </div>
+            <div class="settings-row">
+              <label>Show page numbers</label>
+              <label class="toggle"><input type="checkbox" id="st-pgnums"><span class="toggle-sl"></span></label>
+            </div>
+          </div>
+        </div>
+        <!-- Account -->
+        <div class="settings-panel" id="stab-account">
+          <div class="settings-section">
+            <h3>Profile</h3>
+            <div class="settings-row"><label>Email</label><input type="email" id="st-email" style="width:200px"></div>
+            <div class="settings-row"><label>Display name</label><input type="text" id="st-displayname" style="width:180px"></div>
+            <div class="settings-row"><label>Avatar color</label><input type="color" id="st-avatar-color"></div>
+          </div>
+          <div class="settings-section">
+            <h3>Change Password</h3>
+            <div class="settings-row"><label>Current password</label><input type="password" id="st-cur-pw" style="width:180px" placeholder="required to change"></div>
+            <div class="settings-row"><label>New password</label><input type="password" id="st-new-pw" style="width:180px" placeholder="leave blank to keep"></div>
+          </div>
+          <button class="btn-sm btn-primary" id="btn-save-account" style="margin-top:4px">Save Changes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!--  CANVAS EDITOR OVERLAY (full-screen)                         -->
+<!-- ════════════════════════════════════════════════════════════ -->
+<div id="editor-overlay" class="editor-overlay" style="display:none">
+
+  <!-- ── Editor topbar ─────────────────────────────────────── -->
+  <div class="editor-topbar">
+    <div class="editor-topbar-left">
+      <button class="btn-icon" id="btn-editor-back" title="Back to notebook">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+      <input class="editor-title" id="editor-page-title" value="Page 1" placeholder="Page title…">
+    </div>
+    <div class="editor-topbar-center">
+      <div class="page-nav">
+        <button class="btn-icon" id="btn-prev-page" title="Previous page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <span class="page-indicator" id="page-indicator">1 / 1</span>
+        <button class="btn-icon" id="btn-next-page" title="Next page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+        <button class="btn-icon" id="btn-add-page-editor" title="Add page">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="editor-topbar-right">
+      <button class="btn-icon btn-undo" id="btn-undo" title="Undo (⌘Z)" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.51"/></svg>
+      </button>
+      <button class="btn-icon btn-redo" id="btn-redo" title="Redo (⌘⇧Z)" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-4.51"/></svg>
+      </button>
+      <div class="divider-v"></div>
+      <!-- Export — PDF primary, PNG in dropdown -->
+      <div class="export-btn-group" id="export-btn-group">
+        <button class="btn-icon" id="btn-export-pdf" title="Export page as PDF">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 13h6M9 17h4"/></svg>
+        </button>
+        <button class="btn-icon" id="btn-export-more" title="More export options" style="width:16px;padding:0 2px;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5H7z"/></svg>
+        </button>
+        <div class="export-dropdown" id="export-dropdown">
+          <button class="export-dropdown-item" id="btn-export-png">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            Export PNG
+          </button>
+        </div>
+      </div>
+      <button class="btn-icon" id="btn-zoom-fit" title="Fit to screen">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+      </button>
+      <div class="zoom-display" id="zoom-display">100%</div>
+      <div class="divider-v"></div>
+      <button class="btn-icon" id="btn-layers-toggle" title="Layers">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Editor body ────────────────────────────────────────── -->
+  <div class="editor-body">
+
+    <!-- ── Toolbox (floating island, top-centre) ────────────── -->
+    <div class="toolbox" id="toolbox">
+
+      <!-- Drawing tools -->
+      <div class="tool-group">
+        <button class="tool-btn active" data-tool="pen" title="Pen (P)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="pencil" title="Pencil">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="marker" title="Marker">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="2" width="20" height="12" rx="2"/><path d="M10 18l2 4 2-4"/><line x1="12" y1="18" x2="12" y2="14"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="highlighter" title="Highlighter (H)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15.5 3.5l5 5L9 21H4v-5L15.5 3.5z"/><line x1="2" y1="22" x2="9" y2="22" stroke-width="3.5" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Shape / text tools -->
+      <div class="tool-group">
+        <button class="tool-btn" data-tool="select" title="Select / Move (S)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 3l14 9-7 1-3 7z"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="text" title="Text (T)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="line" title="Line">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="5" y1="19" x2="19" y2="5"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="rect" title="Rectangle">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="circle" title="Circle">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="arrow" title="Arrow">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="5" y1="19" x2="19" y2="5"/><polyline points="14 5 19 5 19 10"/></svg>
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Eraser / lasso / insert -->
+      <div class="tool-group">
+        <button class="tool-btn" data-tool="eraser" title="Eraser (E)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="20 20 6 20"/><path d="M10.9 5.1L20 14.2 14.1 20l-9-9.1z"/></svg>
+        </button>
+        <button class="tool-btn" data-tool="lasso" title="Lasso select (L)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="2 1.5"><path d="M19 11C19 16.523 14.523 21 9 21C3.477 21 3 16.523 3 11C3 5.477 7.477 1 13 1C18.523 1 19 5.477 19 11Z"/></svg>
+        </button>
+        <button class="tool-btn" id="btn-insert-image" title="Insert image">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+        </button>
+        <button class="tool-btn" id="btn-import-pdf" title="Import PDF as new pages">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 12h6M9 16h4"/></svg>
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Colour & style trigger -->
+      <div class="tool-group">
+        <div class="tool-style-btn" id="tool-style-btn" title="Colour, size &amp; opacity">
+          <div class="active-color" id="active-color-swatch" style="background:#000000"></div>
+        </div>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Background / template -->
+      <div class="tool-group">
+        <button class="tool-btn" id="btn-page-template" title="Change background / template">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+        </button>
+      </div>
+
+      <!-- Colour / style popup panel -->
+      <div class="tool-popup" id="tool-color-popup">
+        <div class="quick-colors" id="quick-colors">
+          <div class="qcolor active" style="background:#000000" data-color="#000000"></div>
+          <div class="qcolor" style="background:#ffffff" data-color="#ffffff"></div>
+          <div class="qcolor" style="background:#ef4444" data-color="#ef4444"></div>
+          <div class="qcolor" style="background:#f97316" data-color="#f97316"></div>
+          <div class="qcolor" style="background:#eab308" data-color="#eab308"></div>
+          <div class="qcolor" style="background:#22c55e" data-color="#22c55e"></div>
+          <div class="qcolor" style="background:#6366f1" data-color="#6366f1"></div>
+          <div class="qcolor" style="background:#a855f7" data-color="#a855f7"></div>
+          <div class="qcolor" style="background:#06b6d4" data-color="#06b6d4"></div>
+          <div class="qcolor" style="background:#ec4899" data-color="#ec4899"></div>
+          <div class="qcolor addcolor" id="btn-custom-color" title="Custom colour">+</div>
+        </div>
+        <input type="color" id="color-picker-input" style="display:none">
+        <div class="popup-hr"></div>
+        <div class="popup-section">
+          <span class="popup-label">Size</span>
+          <div class="popup-row">
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor" style="opacity:.5"><circle cx="4" cy="4" r="2"/></svg>
+            <input type="range" id="stroke-width" class="slider-h" min="0.5" max="60" step="0.5" value="2.5">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="opacity:.5"><circle cx="6" cy="6" r="5"/></svg>
+            <span class="popup-val" id="stroke-width-val">2.5</span>
+          </div>
+        </div>
+        <div class="popup-hr"></div>
+        <div class="popup-section">
+          <span class="popup-label">Opacity</span>
+          <div class="popup-row">
+            <input type="range" id="stroke-opacity" class="slider-h" min="5" max="100" step="5" value="100">
+            <span class="popup-val" id="stroke-opacity-val">100%</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Canvas area ────────────────────────────────────── -->
+    <div class="canvas-area" id="canvas-area">
+      <div class="canvas-viewport" id="canvas-viewport">
+        <!-- Canvas layers rendered by JS -->
+        <div class="page-canvas-container" id="page-canvas-container">
+          <!-- template canvas (bottom) -->
+          <canvas id="canvas-template" class="canvas-layer"></canvas>
+          <!-- per-layer canvases inserted here by JS -->
+          <canvas id="canvas-active" class="canvas-layer canvas-active-layer"></canvas>
+          <!-- selection / overlay canvas (top) -->
+          <canvas id="canvas-overlay" class="canvas-layer canvas-overlay-layer"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Layers panel (right, collapsible) ─────────────── -->
+    <div class="layers-panel hidden" id="layers-panel">
+      <div class="layers-header">
+        <span>Layers</span>
+        <button class="btn-icon btn-xs" id="btn-add-layer" title="Add layer">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+      </div>
+      <div class="layers-list" id="layers-list">
+        <!-- layers rendered by JS -->
+      </div>
+    </div>
+
+  </div><!-- /editor-body -->
+
+  <!-- ── Editor status bar ─────────────────────────────────── -->
+  <div class="editor-statusbar" id="editor-statusbar">
+    <span id="status-tool">Pen</span>
+    <span class="separator">·</span>
+    <span id="status-coords">0, 0</span>
+    <span class="separator">·</span>
+    <span id="status-save">Saved</span>
+  </div>
+
+  <!-- Hidden file input for image insert -->
+  <input type="file" id="image-file-input" accept="image/*" style="display:none">
+  <!-- Hidden file input for PDF import -->
+  <input type="file" id="pdf-file-input" accept=".pdf,application/pdf" style="display:none">
+
+</div><!-- /editor-overlay -->
+
+<!-- ════════════════════════════════════════════════════════════ -->
+<!--  MODALS                                                       -->
+<!-- ════════════════════════════════════════════════════════════ -->
+
+<!-- New/Edit Notebook modal -->
+<div class="modal-backdrop" id="modal-notebook" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-notebook-title">New Notebook</h3>
+      <button class="btn-icon modal-close" data-modal="modal-notebook">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label>Title</label>
+        <input id="nb-modal-title" type="text" placeholder="My Notebook" maxlength="80">
+      </div>
+      <div class="form-group">
+        <label>Icon</label>
+        <div class="emoji-picker" id="nb-icon-picker">
+          <span data-emoji="📓">📓</span><span data-emoji="📔">📔</span><span data-emoji="📒">📒</span>
+          <span data-emoji="📕">📕</span><span data-emoji="📗">📗</span><span data-emoji="📘">📘</span>
+          <span data-emoji="📙">📙</span><span data-emoji="📚">📚</span><span data-emoji="📝">📝</span>
+          <span data-emoji="✏️">✏️</span><span data-emoji="🖊️">🖊️</span><span data-emoji="🎨">🎨</span>
+          <span data-emoji="💡">💡</span><span data-emoji="🔬">🔬</span><span data-emoji="🎵">🎵</span>
+          <span data-emoji="📐">📐</span><span data-emoji="🗒️">🗒️</span><span data-emoji="📋">📋</span>
+        </div>
+        <input id="nb-modal-icon" type="text" value="📓" maxlength="4" style="width:60px;text-align:center;font-size:1.4rem">
+      </div>
+      <div class="form-group">
+        <label>Cover color</label>
+        <div class="color-row" id="nb-colors">
+          <div class="nb-color active" style="background:#6366f1" data-color="#6366f1"></div>
+          <div class="nb-color" style="background:#8b5cf6" data-color="#8b5cf6"></div>
+          <div class="nb-color" style="background:#ec4899" data-color="#ec4899"></div>
+          <div class="nb-color" style="background:#ef4444" data-color="#ef4444"></div>
+          <div class="nb-color" style="background:#f97316" data-color="#f97316"></div>
+          <div class="nb-color" style="background:#eab308" data-color="#eab308"></div>
+          <div class="nb-color" style="background:#22c55e" data-color="#22c55e"></div>
+          <div class="nb-color" style="background:#06b6d4" data-color="#06b6d4"></div>
+          <div class="nb-color" style="background:#64748b" data-color="#64748b"></div>
+          <div class="nb-color" style="background:#18181b" data-color="#18181b"></div>
+          <input type="color" id="nb-custom-color" title="Custom" style="width:32px;height:32px;border-radius:8px;cursor:pointer;border:2px solid var(--border-mid);background:none;padding:1px">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Tags</label>
+        <input id="nb-modal-tags" type="text" placeholder="comma separated tags">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm btn-ghost" data-modal="modal-notebook">Cancel</button>
+      <button class="btn-sm btn-primary" id="btn-notebook-save">Create</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Page / Template picker modal -->
+<div class="modal-backdrop" id="modal-template" style="display:none">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Page Template</h3>
+      <button class="btn-icon modal-close" data-modal="modal-template">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="template-grid" id="template-grid">
+        <div class="tmpl-card active" data-tmpl="blank"><div class="tmpl-preview tmpl-blank"></div><span>Blank</span></div>
+        <div class="tmpl-card" data-tmpl="lined"><div class="tmpl-preview tmpl-lined"></div><span>Lined</span></div>
+        <div class="tmpl-card" data-tmpl="dotted"><div class="tmpl-preview tmpl-dotted"></div><span>Dotted</span></div>
+        <div class="tmpl-card" data-tmpl="grid"><div class="tmpl-preview tmpl-grid"></div><span>Grid</span></div>
+        <div class="tmpl-card" data-tmpl="hex"><div class="tmpl-preview tmpl-hex"></div><span>Hexagon</span></div>
+        <div class="tmpl-card" data-tmpl="music"><div class="tmpl-preview tmpl-music"></div><span>Music</span></div>
+        <div class="tmpl-card" data-tmpl="cornell"><div class="tmpl-preview tmpl-cornell"></div><span>Cornell</span></div>
+        <div class="tmpl-card" data-tmpl="isometric"><div class="tmpl-preview tmpl-isometric"></div><span>Isometric</span></div>
+      </div>
+      <div class="form-group" style="margin-top:1rem">
+        <label>Background</label>
+        <div class="bg-color-row" id="page-bg-colors">
+          <div class="nb-color active" style="background:var(--surface3)" data-bg="default" title="Default"></div>
+          <div class="nb-color" style="background:#fff9f0" data-bg="#fff9f0" title="Warm paper"></div>
+          <div class="nb-color" style="background:#f0f4ff" data-bg="#f0f4ff" title="Cool white"></div>
+          <div class="nb-color" style="background:#1a1a2e" data-bg="#1a1a2e" title="Night"></div>
+          <div class="nb-color" style="background:#0f2027" data-bg="#0f2027" title="Dark navy"></div>
+          <div class="nb-color" style="background:#fffde7" data-bg="#fffde7" title="Yellow notepad"></div>
+          <input type="color" id="page-bg-custom" title="Custom" style="width:32px;height:32px;border-radius:8px;cursor:pointer;border:2px solid var(--border-mid);background:none;padding:1px">
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-sm btn-ghost" data-modal="modal-template">Cancel</button>
+      <button class="btn-sm btn-primary" id="btn-template-apply">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context menu -->
+<div class="context-menu" id="context-menu" style="display:none">
+  <button class="ctx-item" id="ctx-open">Open</button>
+  <button class="ctx-item" id="ctx-rename">Rename</button>
+  <button class="ctx-item" id="ctx-duplicate">Duplicate</button>
+  <button class="ctx-item" id="ctx-pin">Pin</button>
+  <button class="ctx-item" id="ctx-archive">Archive</button>
+  <div class="ctx-divider"></div>
+  <button class="ctx-item ctx-danger" id="ctx-delete">Delete</button>
+</div>
+
+<!-- Toast notification -->
+<div id="toast" class="toast" style="display:none"></div>
+
+<!-- ─────────────────────────────────────────────────────────── -->
+<script src="/js/app.js" type="module"></script>
+<!-- PDF.js served locally (no external CDN needed) -->
+<script src="/js/pdfjs/pdf.min.js"></script>
+<script>if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='/js/pdfjs/pdf.worker.min.js';</script>
+</body>
+</html>

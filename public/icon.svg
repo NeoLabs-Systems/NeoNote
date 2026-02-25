@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a5b4fc" stop-opacity=".5"/>
+      <stop offset="100%" stop-color="#6366f1" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <!-- Background with rounded corners -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect width="512" height="512" rx="112" fill="url(#glow)"/>
+
+  <!-- Notebook pages (3 stacked) -->
+  <rect x="140" y="130" width="232" height="290" rx="18" fill="rgba(255,255,255,0.12)"/>
+  <rect x="152" y="120" width="232" height="290" rx="18" fill="rgba(255,255,255,0.18)"/>
+  <rect x="164" y="110" width="232" height="290" rx="18" fill="rgba(255,255,255,0.96)"/>
+
+  <!-- Spiral binding dots -->
+  <circle cx="164" cy="148" r="9" fill="#6366f1" opacity=".6"/>
+  <circle cx="164" cy="185" r="9" fill="#6366f1" opacity=".6"/>
+  <circle cx="164" cy="222" r="9" fill="#6366f1" opacity=".6"/>
+  <circle cx="164" cy="259" r="9" fill="#6366f1" opacity=".6"/>
+  <circle cx="164" cy="296" r="9" fill="#6366f1" opacity=".6"/>
+  <circle cx="164" cy="333" r="9" fill="#6366f1" opacity=".6"/>
+  <circle cx="164" cy="370" r="9" fill="#6366f1" opacity=".6"/>
+
+  <!-- Pen / pencil drawing on the page -->
+  <g transform="translate(210,155)">
+    <!-- A flowing brush stroke representing handwriting -->
+    <path d="M 0 60 Q 30 20 65 45 Q 100 70 130 30" 
+          stroke="#6366f1" stroke-width="9" stroke-linecap="round" fill="none"/>
+    <!-- A second line -->
+    <path d="M 5 100 Q 40 80 80 95 Q 110 108 130 85"
+          stroke="#8b5cf6" stroke-width="7" stroke-linecap="round" fill="none"/>
+    <!-- A short line -->
+    <path d="M 0 140 L 90 140"
+          stroke="#c7d2fe" stroke-width="5" stroke-linecap="round" fill="none"/>
+
+    <!-- Pen icon -->
+    <g transform="translate(90,5) rotate(42,16,60)">
+      <rect x="12" y="16" width="8" height="52" rx="3" fill="#6366f1"/>
+      <polygon points="12,68 20,68 16,80" fill="#4f46e5"/>
+      <rect x="11" y="12" width="10" height="6" rx="2" fill="#818cf8"/>
+    </g>
+  </g>
+</svg>

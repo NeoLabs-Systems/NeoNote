@@ -1,0 +1,37 @@
+{
+  "name": "NoteNeo",
+  "short_name": "NoteNeo",
+  "description": "A full-featured hand note-taking and drawing app",
+  "start_url": "/app",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#6366f1",
+  "background_color": "#08080e",
+  "categories": ["productivity", "education"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Notebook",
+      "url": "/app?new=notebook",
+      "description": "Create a new notebook"
+    }
+  ],
+  "screenshots": []
+}

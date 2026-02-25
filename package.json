@@ -1,0 +1,30 @@
+{
+  "name": "neonote",
+  "version": "1.0.0",
+  "description": "NeoNote \u2013 Full-featured self-hosted handwriting & drawing notebook app",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test:api": "node tests/api.test.js",
+    "test:logic": "node tests/canvas.logic.test.js",
+    "test:e2e": "npx playwright test --config=playwright.config.js",
+    "test:e2e:ui": "npx playwright test --config=playwright.config.js --headed",
+    "test": "npm run test:api && npm run test:logic && npm run test:e2e"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "better-sqlite3": "^9.4.3",
+    "connect-sqlite3": "^0.9.14",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.3.1",
+    "express-session": "^1.18.0",
+    "helmet": "^7.1.0",
+    "pdfjs-dist": "^3.11.174",
+    "uuid": "^10.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.2"
+  }
+}
