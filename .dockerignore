@@ -1,0 +1,14 @@
+node_modules/
+data/
+.env
+.env.*
+*.db
+*.db-shm
+*.db-wal
+.git/
+.github/
+tests/
+playwright.config.js
+*.log
+npm-debug.log*
+.DS_Store
