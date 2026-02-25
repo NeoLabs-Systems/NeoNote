@@ -810,27 +810,30 @@ async function applyTemplateModal() {
 function bindContextMenu() {
   $('ctx-open').addEventListener('click', () => {
     if (!contextTarget) return;
+    const target = contextTarget;
     hideContextMenu();
-    if (contextTarget.type === 'notebook') openNotebook(contextTarget.data.id);
-    else if (contextTarget.type === 'page') openPageEditor(contextTarget.data.id);
+    if (target.type === 'notebook') openNotebook(target.data.id);
+    else if (target.type === 'page') openPageEditor(target.data.id);
   });
   $('ctx-rename').addEventListener('click', () => {
     if (!contextTarget) return;
+    const target = contextTarget;
     hideContextMenu();
-    if (contextTarget.type === 'notebook') openNotebookModal('edit', contextTarget.data);
-    else if (contextTarget.type === 'page') {
-      const newTitle = prompt('Page title:', contextTarget.data.title || '');
-      if (newTitle !== null) PATCH('/pages/' + contextTarget.data.id, { title: newTitle }).then(() => loadPages(state.activeNb.id));
+    if (target.type === 'notebook') openNotebookModal('edit', target.data);
+    else if (target.type === 'page') {
+      const newTitle = prompt('Page title:', target.data.title || '');
+      if (newTitle !== null) PATCH('/pages/' + target.data.id, { title: newTitle }).then(() => loadPages(state.activeNb.id));
     }
   });
   $('ctx-duplicate').addEventListener('click', async () => {
     if (!contextTarget) return;
+    const target = contextTarget;
     hideContextMenu();
     try {
-      if (contextTarget.type === 'notebook') {
+      if (target.type === 'notebook') {
         showToast('Duplicate notebook coming soon');
-      } else if (contextTarget.type === 'page') {
-        await POST('/pages/' + contextTarget.data.id + '/duplicate');
+      } else if (target.type === 'page') {
+        await POST('/pages/' + target.data.id + '/duplicate');
         await loadPages(state.activeNb.id);
         showToast('Page duplicated');
       }
@@ -838,24 +841,24 @@ function bindContextMenu() {
   });
   $('ctx-pin').addEventListener('click', async () => {
     if (!contextTarget || contextTarget.type !== 'notebook') return;
-    hideContextMenu();
     const nb = contextTarget.data;
+    hideContextMenu();
     await PATCH('/notebooks/' + nb.id, { pinned: !nb.pinned });
     await loadNotebooks(state.view);
     showToast(nb.pinned ? 'Unpinned' : 'Pinned');
   });
   $('ctx-archive').addEventListener('click', async () => {
     if (!contextTarget || contextTarget.type !== 'notebook') return;
-    hideContextMenu();
     const nb = contextTarget.data;
+    hideContextMenu();
     await PATCH('/notebooks/' + nb.id, { archived: !nb.archived });
     await loadNotebooks(state.view);
     showToast(nb.archived ? 'Unarchived' : 'Archived');
   });
   $('ctx-delete').addEventListener('click', async () => {
     if (!contextTarget) return;
-    hideContextMenu();
     const { type, data } = contextTarget;
+    hideContextMenu();
     const label = type === 'notebook' ? `notebook "${data.title}"` : 'this page';
     if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
     try {
