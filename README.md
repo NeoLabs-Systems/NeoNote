@@ -12,6 +12,8 @@ A full-featured handwriting and drawing notebook app — self-hosted, fast, and 
 Write, sketch, and organise your thoughts completely on your own machine.  
 No subscriptions. No syncing to someone else's cloud. Just your ideas.
 
+<img width="2936" height="1414" alt="image" src="https://github.com/user-attachments/assets/2f786475-1a84-4b12-a07e-e5bf59775eaa" />
+
 ---
 
 [📖 Docs](https://github.com/NeoLabs-Systems/NeoNote/wiki) · [🐛 Issues](https://github.com/NeoLabs-Systems/NeoNote/issues)
