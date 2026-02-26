@@ -54,15 +54,17 @@ app.use(helmet({
 
 /*
  * TRUST_PROXY env var controls whether Express should trust the proxy.
- * - If TRUST_PROXY is explicitly set to "0" or "false", proxy trusting is disabled.
- * - Otherwise (unset or any other value), keep the previous default of trusting (1).
+ * - If TRUST_PROXY is explicitly set to "0" or "false", proxy trusting is disabled (more compatible with local setups).
+ * - Otherwise (unset or any other value), trust proxy is enabled (1).
  */
 const _trustProxyEnv = String(process.env.TRUST_PROXY || '').toLowerCase();
-if (_trustProxyEnv === '0' || _trustProxyEnv === 'false') {
-  app.set('trust proxy', false);
-  console.log('[config] TRUST_PROXY disabled via env');
-} else {
+const trustProxyEnabled = !(_trustProxyEnv === '0' || _trustProxyEnv === 'false');
+if (trustProxyEnabled) {
   app.set('trust proxy', 1);
+  console.log('[config] TRUST_PROXY enabled (trust proxy = 1)');
+} else {
+  app.set('trust proxy', false);
+  console.log('[config] TRUST_PROXY disabled via env (trust proxy = false)');
 }
 app.use(express.json({ limit: '32mb' }));
 app.use(express.urlencoded({ extended: false, limit: '4mb' }));
@@ -94,7 +96,12 @@ app.use(session({
 app.use(express.static(path.join(__dirname, 'public'), { index: false }));
 
 /* ── Rate limiter ───────────────────────────────────────────────────────── */
-app.use('/api', rateLimit({ windowMs: 60_000, max: 500 }));
+const _rlTrustProxy = trustProxyEnabled; /* use same flag for rate-limit validation */
+app.use('/api', rateLimit({
+  windowMs: 60_000,
+  max: 500,
+  validate: { trustProxy: _rlTrustProxy }
+}));
 
 /* ── Page routes ────────────────────────────────────────────────────────── */
 app.get('/', (req, res) => {
