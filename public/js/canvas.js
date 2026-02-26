@@ -15,8 +15,8 @@
 export class CanvasEngine {
   constructor(opts = {}) {
     // For straight line detection
-    _lineSnapTimer = null;
-    _lineSnapActive = false;
+    this._lineSnapTimer = null;
+    this._lineSnapActive = false;
     this.onSave       = opts.onSave       || (() => {});
     this.onStatusUpdate = opts.onStatusUpdate || (() => {});
     this.onUndoRedoUpdate = opts.onUndoRedoUpdate || (() => {});
