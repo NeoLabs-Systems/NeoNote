@@ -10,7 +10,11 @@
     </filter>
   </defs>
 
-  <!-- Only the document/logo (transparent background) -->
+  
+  <!-- Black background square (icon) -->
+  <rect x="32" y="32" width="448" height="448" rx="112" fill="#000000" />
+
+  <!-- Document/logo on black background -->
   <g transform="translate(0,0)">
     <rect x="140" y="130" width="232" height="280" rx="24" fill="url(#primary)" filter="url(#glow)"/>
 
