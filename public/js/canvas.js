@@ -980,24 +980,25 @@ export class CanvasEngine {
     } else {
       this._drawPressurePath(ctx, pts, this.width);
     }
-      // Helper: check if points are almost a straight line
-      _isAlmostStraightLine(pts) {
-        if (pts.length < 2) return false;
-        const [a, b] = [pts[0], pts[pts.length - 1]];
-        const dx = b.x - a.x, dy = b.y - a.y;
-        const len = Math.hypot(dx, dy);
-        if (len < 40) return false; // ignore very short lines
-        // Compute max distance from any point to the line
-        let maxDist = 0;
-        for (let i = 1; i < pts.length - 1; ++i) {
-          const p = pts[i];
-          // Line AB: (b.y-a.y)x - (b.x-a.x)y + b.x*a.y - b.y*a.x = 0
-          const dist = Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len;
-          if (dist > maxDist) maxDist = dist;
-        }
-        return maxDist < 8; // threshold in px
-      }
     ctx.restore();
+  }
+
+  // Helper: check if points are almost a straight line
+  _isAlmostStraightLine(pts) {
+    if (pts.length < 2) return false;
+    const [a, b] = [pts[0], pts[pts.length - 1]];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 40) return false; // ignore very short lines
+    // Compute max distance from any point to the line
+    let maxDist = 0;
+    for (let i = 1; i < pts.length - 1; ++i) {
+      const p = pts[i];
+      // Line AB: (b.y-a.y)x - (b.x-a.x)y + b.x*a.y - b.y*a.x = 0
+      const dist = Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len;
+      if (dist > maxDist) maxDist = dist;
+    }
+    return maxDist < 8; // threshold in px
   }
 
   /* ═══════════════════════════════════════════════════════════
