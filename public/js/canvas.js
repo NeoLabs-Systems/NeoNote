@@ -13,10 +13,10 @@
  */
 
 export class CanvasEngine {
-    // For straight line detection
-    this._lineSnapTimer = null;
-    this._lineSnapActive = false;
   constructor(opts = {}) {
+    // For straight line detection
+    _lineSnapTimer = null;
+    _lineSnapActive = false;
     this.onSave       = opts.onSave       || (() => {});
     this.onStatusUpdate = opts.onStatusUpdate || (() => {});
     this.onUndoRedoUpdate = opts.onUndoRedoUpdate || (() => {});

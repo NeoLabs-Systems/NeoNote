@@ -606,7 +606,11 @@ function bindEditorToolbar() {
 
   /* Delete current page in editor */
   $('btn-delete-page-editor').addEventListener('click', async () => {
-    if (editorPages.length === 0) return;
+    console.log('[NeoNote] Delete bin clicked', { editorPages, editorPageIdx });
+    if (editorPages.length === 0) {
+      showToast('No pages to delete');
+      return;
+    }
     const page = editorPages[editorPageIdx];
     const label = page?.title || `Page ${editorPageIdx + 1}`;
     if (!confirm(`Delete "${label}"? This cannot be undone.`)) return;
@@ -620,7 +624,10 @@ function bindEditorToolbar() {
         await loadPageIntoEditor(nextIdx);
       }
       showToast('Page deleted');
-    } catch (e) { showToast('Failed to delete page'); }
+    } catch (e) {
+      console.error('[NeoNote] Failed to delete page', e);
+      showToast('Failed to delete page: ' + (e.message || e));
+    }
   });
 
   /* Insert image */
