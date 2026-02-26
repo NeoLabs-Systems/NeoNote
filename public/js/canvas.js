@@ -13,6 +13,9 @@
  */
 
 export class CanvasEngine {
+    // For straight line detection
+    this._lineSnapTimer = null;
+    this._lineSnapActive = false;
   constructor(opts = {}) {
     this.onSave       = opts.onSave       || (() => {});
     this.onStatusUpdate = opts.onStatusUpdate || (() => {});
@@ -92,6 +95,9 @@ export class CanvasEngine {
 
     /* Palm rejection */
     this._palmRejection = true;
+
+    /* Text font size (independent of stroke width) */
+    this.textFontSize = 24;
 
     this._bindEvents();
   }
@@ -325,20 +331,7 @@ export class CanvasEngine {
 
     const pts = stroke.points;
 
-    if (stroke.tool === 'pencil') {
-      /* Pencil: sketchy texture with deterministic noise (cached to prevent re-render flicker) */
-      if (!stroke._noisyPts) {
-        stroke._noisyPts = pts.map((p, i) => ({
-          ...p,
-          x: p.x + (Math.sin(i * 12.9898 + 78.233) * 43758.5453 % 1 - 0.5) * 1.2,
-          y: p.y + (Math.sin(i * 78.233 + 12.9898) * 43758.5453 % 1 - 0.5) * 1.2,
-        }));
-      }
-      ctx.globalAlpha = (stroke.opacity ?? 1.0) * 0.6;
-      this._drawSmooth(ctx, pts, stroke.width * 0.8);
-      ctx.globalAlpha = (stroke.opacity ?? 1.0) * 0.3;
-      this._drawSmooth(ctx, stroke._noisyPts, stroke.width * 0.5);
-    } else if (stroke.tool === 'highlighter') {
+    if (stroke.tool === 'highlighter') {
       ctx.lineWidth = stroke.width * 8;
       ctx.lineCap   = 'square';
       this._drawSmooth(ctx, pts, stroke.width * 8);
@@ -621,6 +614,8 @@ export class CanvasEngine {
     this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
     this.color = textStroke.color;
     this.width = textStroke.width;
+    /* Restore the original font size so the re-edit textarea matches */
+    if (textStroke.extra?.fontSize) this.textFontSize = textStroke.extra.fontSize;
     this.setTool('text');
     this._startTextInput(textStroke.points[0].x, textStroke.points[0].y, textStroke);
   }
@@ -644,7 +639,15 @@ export class CanvasEngine {
       this._drawingPointerId = null;
       this._points = [];
     }
-    if (this._palmRejection && e.pointerType === 'touch' && this.tool !== 'select' && this.tool !== 'lasso') return;
+    /* Single-finger touch pan when no drawing tool is active */
+    const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
+    if (e.pointerType === 'touch' && e.isPrimary && !_DRAW_TOOLS.includes(this.tool)) {
+      this._panning = true;
+      this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
+      return;
+    }
+    /* Palm rejection for drawing tools when touch input */
+    if (this._palmRejection && e.pointerType === 'touch') return;
     /* Space + drag = pan */
     if (this._spaceDown) {
       this._panning = true; this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
@@ -662,6 +665,18 @@ export class CanvasEngine {
     this._drawingPointerId = e.pointerId;   /* track which pointer started this stroke */
     this._points  = [{ x: pt.x, y: pt.y, p: pressure, t: Date.now() }];
     this._lastX   = pt.x; this._lastY = pt.y;
+
+    // Start straight line detection timer for pen tool
+    if (this.tool === 'pen') {
+      this._lineSnapActive = false;
+      clearTimeout(this._lineSnapTimer);
+      this._lineSnapTimer = setTimeout(() => {
+        if (this._points.length > 8 && this._isAlmostStraightLine(this._points)) {
+          this._lineSnapActive = true;
+          // Optionally, show a visual indicator here
+        }
+      }, 500); // 0.5s hold
+    }
 
     if (this.tool === 'text') {
       this._drawing = false;
@@ -737,7 +752,7 @@ export class CanvasEngine {
     if (!this._drawing) return;
     /* Ignore events from a different pointer (e.g. palm while pen is active) */
     if (this._drawingPointerId != null && e.pointerId !== this._drawingPointerId) return;
-    if (this._palmRejection && e.pointerType === 'touch' && this.tool !== 'select' && this.tool !== 'lasso') return;
+    if (this._palmRejection && e.pointerType === 'touch') return;
 
     const pressure = (e.pressure > 0 && this.pressureEnabled) ? e.pressure : 0.5;
 
@@ -748,6 +763,13 @@ export class CanvasEngine {
     for (const ce of coalesced) {
       const cp = this._screenToPage(ce.clientX, ce.clientY);
       this._points.push({ x: cp.x, y: cp.y, p: (ce.pressure > 0 && this.pressureEnabled) ? ce.pressure : pressure, t: Date.now() });
+    }
+
+    // If line snap is active, replace points with endpoints
+    if (this.tool === 'pen' && this._lineSnapActive && this._points.length > 2) {
+      const first = this._points[0];
+      const last = this._points[this._points.length - 1];
+      this._points = [first, last];
     }
 
     this._lastX = pt.x; this._lastY = pt.y;
@@ -777,6 +799,8 @@ export class CanvasEngine {
     this._drawing = false;
     this._drawingPointerId = null;
     if (e) e.preventDefault();
+    clearTimeout(this._lineSnapTimer);
+    this._lineSnapActive = false;
 
     const layer = this.layers[this.activeLayerIdx];
     if (!layer) {
@@ -789,7 +813,7 @@ export class CanvasEngine {
     if (pts.length < 2) {
       this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
       /* Single tap → place a dot for drawing tools */
-      if (pts.length === 1 && ['pen', 'pencil', 'marker', 'highlighter'].includes(this.tool)) {
+      if (pts.length === 1 && ['pen', 'marker', 'highlighter'].includes(this.tool)) {
         const p = pts[0];
         const dotStroke = {
           id: crypto.randomUUID(), layerId: layer.id, pageId: this.pageId,
@@ -946,9 +970,33 @@ export class CanvasEngine {
     if (this.tool === 'highlighter') {
       ctx.lineWidth = this.width * 8; ctx.lineCap = 'square';
       this._drawSmooth(ctx, pts, this.width * 8);
+    } else if (this.tool === 'pen' && this._lineSnapActive && pts.length === 2) {
+      // Draw a perfect line preview
+      ctx.lineWidth = this.width;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      ctx.lineTo(pts[1].x, pts[1].y);
+      ctx.stroke();
     } else {
       this._drawPressurePath(ctx, pts, this.width);
     }
+      // Helper: check if points are almost a straight line
+      _isAlmostStraightLine(pts) {
+        if (pts.length < 2) return false;
+        const [a, b] = [pts[0], pts[pts.length - 1]];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 40) return false; // ignore very short lines
+        // Compute max distance from any point to the line
+        let maxDist = 0;
+        for (let i = 1; i < pts.length - 1; ++i) {
+          const p = pts[i];
+          // Line AB: (b.y-a.y)x - (b.x-a.x)y + b.x*a.y - b.y*a.x = 0
+          const dist = Math.abs(dy * p.x - dx * p.y + b.x * a.y - b.y * a.x) / len;
+          if (dist > maxDist) maxDist = dist;
+        }
+        return maxDist < 8; // threshold in px
+      }
     ctx.restore();
   }
 
@@ -985,7 +1033,7 @@ export class CanvasEngine {
     const inp = document.createElement('textarea');
     const sx  = x * this.scale + this.offsetX + rect.left;
     const sy  = y * this.scale + this.offsetY + rect.top;
-    const fontSize = Math.max(10, this.width * 8 * this.scale);
+    const fontSize = Math.max(8, this.textFontSize * this.scale);
     inp.style.cssText = `
       position:fixed; left:${sx}px; top:${sy}px;
       min-width:120px; min-height:${fontSize * 1.6}px;
@@ -1019,7 +1067,7 @@ export class CanvasEngine {
     if (!text) return;
 
     const layer = this.layers[this.activeLayerIdx];
-    const fontSize = Math.max(10, this.width * 8);
+    const fontSize = Math.max(8, this.textFontSize);
     const lines    = text.split('\n');
     const maxLen   = Math.max(...lines.map(l => l.length));
     const textBbox = { x, y, w: Math.max(20, maxLen * fontSize * 0.62), h: lines.length * fontSize * 1.4 };
@@ -1480,7 +1528,7 @@ export class CanvasEngine {
     if (e.key === ' ') { e.preventDefault(); this._spaceDown = true; this.canvasArea.style.cursor = 'grab'; }
 
     /* Tool shortcuts */
-    const toolMap = { p: 'pen', c: 'pencil', m: 'marker', h: 'highlighter', e: 'eraser', s: 'select', t: 'text', l: 'lasso' };
+    const toolMap = { p: 'pen', m: 'marker', h: 'highlighter', e: 'eraser', t: 'text', l: 'lasso' };
     if (!e.metaKey && !e.ctrlKey && toolMap[e.key]) { this.setTool(toolMap[e.key]); }
   }
 
@@ -1569,7 +1617,7 @@ export class CanvasEngine {
       this._drawSelectOverlay();
     }
     const cursors = {
-      pen: 'crosshair', pencil: 'crosshair', marker: 'crosshair',
+      pen: 'crosshair', marker: 'crosshair',
       highlighter: 'crosshair', eraser: 'cell', text: 'text',
       select: 'default', lasso: 'crosshair',
       line: 'crosshair', rect: 'crosshair', circle: 'crosshair', arrow: 'crosshair',
@@ -1580,6 +1628,7 @@ export class CanvasEngine {
   setColor(color) { this.color = color; }
   setWidth(w) { this.width = w; }
   setOpacity(o) { this.opacity = o; }
+  setTextFontSize(sz) { this.textFontSize = Math.max(8, sz); }
   setPalmRejection(v) { this._palmRejection = v; }
   setPressureEnabled(v) { this.pressureEnabled = v; }
   setAutoSaveInterval(ms) { this._autoSaveInterval = ms; }

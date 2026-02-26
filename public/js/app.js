@@ -471,6 +471,13 @@ function bindCanvasEngineToolbar() {
     $('stroke-opacity-val').textContent = Math.round(v * 100) + '%';
   });
 
+  /* Text font size slider */
+  $('text-font-size').addEventListener('input', () => {
+    const v = parseInt($('text-font-size').value);
+    engine.setTextFontSize(v);
+    $('text-font-size-val').textContent = v + 'px';
+  });
+
   /* Quick colors */
   document.querySelectorAll('.qcolor').forEach(el => {
     if (el.id === 'btn-custom-color') return;
@@ -585,11 +592,34 @@ function bindEditorToolbar() {
   $('btn-add-page-editor').addEventListener('click', async () => {
     if (!editorNotebookId) return;
     try {
-      const page = await POST('/pages', { notebookId: editorNotebookId, afterPageId: editorPages[editorPageIdx]?.id });
+      /* Match template & background of the first page in this notebook */
+      const firstPage = editorPages[0];
+      const template  = firstPage?.template  || 'blank';
+      const bgColor   = firstPage?.bg_color  || 'default';
+      const page = await POST('/pages', { notebookId: editorNotebookId, afterPageId: editorPages[editorPageIdx]?.id, template, bgColor });
       editorPages.splice(editorPageIdx + 1, 0, page);
       $('page-indicator').textContent = `${editorPageIdx + 1} / ${editorPages.length}`;
       await loadPageIntoEditor(editorPageIdx + 1);
     } catch (e) { showToast('Failed to add page'); }
+  });
+
+  /* Delete current page in editor */
+  $('btn-delete-page-editor').addEventListener('click', async () => {
+    if (editorPages.length === 0) return;
+    const page = editorPages[editorPageIdx];
+    const label = page?.title || `Page ${editorPageIdx + 1}`;
+    if (!confirm(`Delete "${label}"? This cannot be undone.`)) return;
+    try {
+      await DELETE('/pages/' + page.id);
+      editorPages.splice(editorPageIdx, 1);
+      if (editorPages.length === 0) {
+        closeEditor();
+      } else {
+        const nextIdx = Math.min(editorPageIdx, editorPages.length - 1);
+        await loadPageIntoEditor(nextIdx);
+      }
+      showToast('Page deleted');
+    } catch (e) { showToast('Failed to delete page'); }
   });
 
   /* Insert image */
