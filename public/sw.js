@@ -1,9 +1,9 @@
 /**
- * NoteNeo — Service Worker
+ * NeoNote — Service Worker
  * Provides offline-first caching for the app shell.
  */
 
-const CACHE_NAME = 'noteeneo-v1';
+const CACHE_NAME = 'neonote-v1';
 const SHELL_ASSETS = [
   '/app',
   '/login',

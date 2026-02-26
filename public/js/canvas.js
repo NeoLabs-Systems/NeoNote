@@ -1,5 +1,5 @@
 /**
- * NoteNeo — canvas.js
+ * NeoNote — canvas.js
  * Full-featured drawing engine:
  *   • Pressure-sensitive strokes (PointerEvents API)
  *   • Tools: pen, pencil, marker, highlighter, eraser, text, line, rect, circle, arrow, lasso, select

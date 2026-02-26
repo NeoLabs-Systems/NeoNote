@@ -1,5 +1,5 @@
 /**
- * NoteNeo — app.js
+ * NeoNote — app.js
  * Main SPA controller. Handles:
  *   • Navigation (notebook grid → page grid → canvas editor)
  *   • CRUD for notebooks / pages
@@ -112,7 +112,7 @@ async function init() {
       }
     });
   } catch (e) {
-    console.error('[NoteNeo] init error', e);
+    console.error('[NeoNote] init error', e);
     location.href = '/login';
   }
 }
@@ -1193,7 +1193,7 @@ async function importPDF(file) {
     await loadPageIntoEditor(firstNewIdx);
     showToast(`PDF imported — ${total} page${total > 1 ? 's' : ''} added`);
   } catch (err) {
-    console.error('[NoteNeo] PDF import error', err);
+    console.error('[NeoNote] PDF import error', err);
     showToast('PDF import failed: ' + (err.message || err));
   }
 }

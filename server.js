@@ -52,7 +52,18 @@ app.use(helmet({
   crossOriginEmbedderPolicy: false
 }));
 
-app.set('trust proxy', 1);
+/*
+ * TRUST_PROXY env var controls whether Express should trust the proxy.
+ * - If TRUST_PROXY is explicitly set to "0" or "false", proxy trusting is disabled.
+ * - Otherwise (unset or any other value), keep the previous default of trusting (1).
+ */
+const _trustProxyEnv = String(process.env.TRUST_PROXY || '').toLowerCase();
+if (_trustProxyEnv === '0' || _trustProxyEnv === 'false') {
+  app.set('trust proxy', false);
+  console.log('[config] TRUST_PROXY disabled via env');
+} else {
+  app.set('trust proxy', 1);
+}
 app.use(express.json({ limit: '32mb' }));
 app.use(express.urlencoded({ extended: false, limit: '4mb' }));
 
@@ -66,8 +77,8 @@ const sessionStore = new SQLiteStore({
   table: 'sessions'
 });
 app.use(session({
-  name: 'noteeneo.sid',
-  secret: process.env.SESSION_SECRET || 'noteeneo-dev-secret-change-me',
+  name: 'neonote.sid',
+  secret: process.env.SESSION_SECRET || 'neonote-dev-secret-change-me',
   resave: false,
   saveUninitialized: false,
   store: sessionStore,
@@ -108,6 +119,6 @@ app.use((err, req, res, _next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`\n  ✦ NoteNeo running at  http://localhost:${PORT}`);
+  console.log(`\n  ✦ NeoNote running at  http://localhost:${PORT}`);
   console.log(`  ✦ Environment: ${process.env.NODE_ENV || 'development'}\n`);
 });

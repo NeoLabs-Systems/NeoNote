@@ -1,6 +1,6 @@
 {
-  "name": "NoteNeo",
-  "short_name": "NoteNeo",
+  "name": "NeoNote",
+  "short_name": "NeoNote",
   "description": "A full-featured hand note-taking and drawing app",
   "start_url": "/app",
   "display": "standalone",
