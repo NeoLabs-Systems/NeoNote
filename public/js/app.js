@@ -375,6 +375,8 @@ async function loadPageIntoEditor(idx) {
   $('btn-next-page').disabled = (idx === editorPages.length - 1);
 
   try {
+    /* Flush any pending eraser deletions / stroke saves before loading new page */
+    if (engine) await engine.forceSave();
     const data = await GET('/export/page/' + page.id);
     await engine.loadPage(data);
   } catch (e) {
@@ -498,7 +500,69 @@ function bindCanvasEngineToolbar() {
     engine.setColor(color);
     $('active-color-swatch').style.background = color;
     document.querySelectorAll('.qcolor').forEach(el => el.classList.remove('active'));
+    document.querySelectorAll('.color-preset-btn').forEach(el => el.classList.remove('active'));
   });
+
+  /* ── 3 Customisable quick-colour presets ───────────────── */
+  const PRESET_KEY      = 'neonote_color_presets';
+  const DEFAULT_PRESETS = ['#ef4444', '#22c55e', '#6366f1'];
+
+  function loadPresets() {
+    try { return JSON.parse(localStorage.getItem(PRESET_KEY)) || DEFAULT_PRESETS; } catch { return DEFAULT_PRESETS; }
+  }
+  function savePresets(arr) { localStorage.setItem(PRESET_KEY, JSON.stringify(arr)); }
+
+  function applyPresets(arr) {
+    arr.forEach((color, i) => {
+      const dot = $(`color-preset-dot-${i}`);
+      if (dot) dot.style.background = color;
+    });
+  }
+
+  let colorPresets = loadPresets();
+  applyPresets(colorPresets);
+
+  for (let i = 0; i < 3; i++) {
+    const btn    = $(`color-preset-${i}`);
+    const picker = $(`color-preset-picker-${i}`);
+    if (!btn || !picker) continue;
+
+    /* Single click → apply color */
+    btn.addEventListener('click', () => {
+      if (!engine) return;
+      const color = colorPresets[i];
+      engine.setColor(color);
+      $('active-color-swatch').style.background = color;
+      document.querySelectorAll('.qcolor').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.color-preset-btn').forEach(el => el.classList.remove('active'));
+      btn.classList.add('active');
+    });
+
+    /* Right-click or long-press → open colour picker to change preset */
+    btn.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      picker.value = colorPresets[i];
+      picker.click();
+    });
+
+    /* Long-press (touch) */
+    let _pressTimer = null;
+    btn.addEventListener('pointerdown', () => {
+      _pressTimer = setTimeout(() => {
+        picker.value = colorPresets[i];
+        picker.click();
+      }, 600);
+    });
+    btn.addEventListener('pointerup',     () => clearTimeout(_pressTimer));
+    btn.addEventListener('pointercancel', () => clearTimeout(_pressTimer));
+
+    /* Color picker change → update preset */
+    picker.addEventListener('input', e => {
+      colorPresets[i] = e.target.value;
+      savePresets(colorPresets);
+      applyPresets(colorPresets);
+    });
+  }
 
   /* Active colour swatch — opens/closes style popup */
   $('tool-style-btn').addEventListener('click', e => {
@@ -539,25 +603,12 @@ function bindEditorToolbar() {
     showToast('Page exported as PDF');
   });
 
-  /* Export dropdown toggle */
-  $('btn-export-more').addEventListener('click', e => {
-    e.stopPropagation();
-    $('export-dropdown').classList.toggle('open');
-  });
-
-  /* Export PNG (secondary) */
+  /* Export PNG */
   $('btn-export-png').addEventListener('click', () => {
     if (!engine) return;
     engine.exportPNG();
-    $('export-dropdown').classList.remove('open');
     showToast('Page exported as PNG');
   });
-
-  /* Close dropdowns on outside click */
-  document.addEventListener('click', () => {
-    $('export-dropdown')?.classList.remove('open');
-  });
-  $('export-btn-group').addEventListener('click', e => e.stopPropagation());
 
   /* Fit to screen */
   $('btn-zoom-fit').addEventListener('click', () => engine?.fitToScreen());

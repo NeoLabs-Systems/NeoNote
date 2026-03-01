@@ -299,21 +299,14 @@
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-4.51"/></svg>
       </button>
       <div class="divider-v"></div>
-      <!-- Export — PDF primary, PNG in dropdown -->
-      <div class="export-btn-group" id="export-btn-group">
-        <button class="btn-icon" id="btn-export-pdf" title="Export page as PDF">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 13h6M9 17h4"/></svg>
-        </button>
-        <button class="btn-icon" id="btn-export-more" title="More export options" style="width:16px;padding:0 2px;">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor"><path d="M7 10l5 5 5-5H7z"/></svg>
-        </button>
-        <div class="export-dropdown" id="export-dropdown">
-          <button class="export-dropdown-item" id="btn-export-png">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-            Export PNG
-          </button>
-        </div>
-      </div>
+      <!-- Export — PDF and PNG as separate direct buttons -->
+      <div class="divider-v"></div>
+      <button class="btn-icon" id="btn-export-pdf" title="Export page as PDF">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M9 13h6M9 17h4"/></svg>
+      </button>
+      <button class="btn-icon" id="btn-export-png" title="Export page as PNG">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      </button>
       <button class="btn-icon" id="btn-zoom-fit" title="Fit to screen">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
       </button>
@@ -390,6 +383,25 @@
         <div class="tool-style-btn" id="tool-style-btn" title="Colour, size &amp; opacity">
           <div class="active-color" id="active-color-swatch" style="background:#000000"></div>
         </div>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- 3 customisable quick-colour presets (tap to apply, right-click / long-press to change) -->
+      <div class="tool-group" id="color-presets-group">
+        <button class="tool-btn color-preset-btn" id="color-preset-0" data-preset-idx="0" title="Quick color 1 (right-click to change)">
+          <span class="color-preset-dot" id="color-preset-dot-0"></span>
+        </button>
+        <button class="tool-btn color-preset-btn" id="color-preset-1" data-preset-idx="1" title="Quick color 2 (right-click to change)">
+          <span class="color-preset-dot" id="color-preset-dot-1"></span>
+        </button>
+        <button class="tool-btn color-preset-btn" id="color-preset-2" data-preset-idx="2" title="Quick color 3 (right-click to change)">
+          <span class="color-preset-dot" id="color-preset-dot-2"></span>
+        </button>
+        <!-- Hidden native color pickers — triggered programmatically -->
+        <input type="color" id="color-preset-picker-0" style="display:none">
+        <input type="color" id="color-preset-picker-1" style="display:none">
+        <input type="color" id="color-preset-picker-2" style="display:none">
       </div>
 
       <div class="tool-divider"></div>

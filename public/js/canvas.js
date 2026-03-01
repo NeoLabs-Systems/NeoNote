@@ -99,6 +99,10 @@ export class CanvasEngine {
     /* Text font size (independent of stroke width) */
     this.textFontSize = 24;
 
+    /* Pen proximity tracking — true when stylus is hovering over canvas */
+    this._penNearby      = false;
+    this._penNearbyTimer = null;
+
     this._bindEvents();
   }
 
@@ -106,6 +110,14 @@ export class CanvasEngine {
      INIT / LOAD PAGE
      ═══════════════════════════════════════════════════════════ */
   async loadPage(pageData) {
+    /* Stop any in-progress stroke/erase so it doesn't bleed into the new page */
+    this._drawing          = false;
+    this._drawingPointerId = null;
+    this._points           = [];
+    this._panning          = false;
+    this.aCtx?.clearRect(0, 0, this.pageW, this.pageH);
+    this.oCtx?.clearRect(0, 0, this.pageW, this.pageH);
+
     this.pageId     = pageData.page.id;
     this.notebookId = pageData.page.notebook_id;
     this.pageW      = pageData.page.width;
@@ -590,6 +602,23 @@ export class CanvasEngine {
     canvas.addEventListener('pointerleave', () => {
       if (this.tool === 'eraser') this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
     });
+
+    /* Track pen/stylus proximity for one-finger scroll logic.
+       Stylus hover fires pointermove with pointerType='pen' and pressure=0. */
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerType === 'pen') {
+        this._penNearby = true;
+        clearTimeout(this._penNearbyTimer);
+        /* Clear after 800 ms of no pen signal — pen moved away */
+        this._penNearbyTimer = setTimeout(() => { this._penNearby = false; }, 800);
+      }
+    }, { passive: true });
+    canvas.addEventListener('pointerleave', e => {
+      if (e.pointerType === 'pen') {
+        clearTimeout(this._penNearbyTimer);
+        this._penNearby = false;
+      }
+    });
   }
 
   _onDblClick(e) {
@@ -639,7 +668,14 @@ export class CanvasEngine {
       this._drawingPointerId = null;
       this._points = [];
     }
-    /* Single-finger touch pan when no drawing tool is active */
+    /* One-finger pan: if no pen/stylus is nearby, treat single-finger touch as a
+       scroll gesture regardless of the active drawing tool (palm-rejection bypass). */
+    if (e.pointerType === 'touch' && e.isPrimary && !this._penNearby) {
+      this._panning = true;
+      this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
+      return;
+    }
+    /* Single-finger touch pan when no drawing tool is active (pen IS nearby) */
     const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
     if (e.pointerType === 'touch' && e.isPrimary && !_DRAW_TOOLS.includes(this.tool)) {
       this._panning = true;
@@ -1117,10 +1153,15 @@ export class CanvasEngine {
       if (!s.points || s.points.length === 0) return false;
       return s.points.some(p => this._pointInPolygon(p.x, p.y, pts));
     });
-    /* Find images whose center is inside lasso */
-    const insideImages = this._images.filter(img =>
-      this._pointInPolygon(img.x + img.width / 2, img.y + img.height / 2, pts)
-    );
+    /* Find images that overlap the lasso — check center AND whether any lasso
+       point falls inside the image bbox (handles large/full-page PDF images). */
+    const insideImages = this._images.filter(img => {
+      if (this._pointInPolygon(img.x + img.width / 2, img.y + img.height / 2, pts)) return true;
+      return pts.some(p =>
+        p.x >= img.x && p.x <= img.x + img.width &&
+        p.y >= img.y && p.y <= img.y + img.height
+      );
+    });
     if (insideStrokes.length > 0 || insideImages.length > 0) {
       this._selection = { strokes: insideStrokes, images: insideImages };
       this._drawSelectOverlay();

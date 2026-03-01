@@ -760,6 +760,24 @@ a:hover      { text-decoration: underline; }
 /* Hidden legacy controls (now in popup) */
 .color-preview-wrap, .width-ctrl, .width-val, .opacity-ctrl { display: none; }
 
+/* Quick colour preset buttons (3 always-visible swatches in the toolbox) */
+.color-preset-dot {
+  display: block;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid var(--border-hi);
+  box-shadow: 0 2px 6px rgba(0,0,0,.35);
+  transition: transform var(--trans), border-color var(--trans), box-shadow var(--trans);
+  pointer-events: none;
+}
+.color-preset-btn:hover .color-preset-dot {
+  transform: scale(1.15);
+  border-color: var(--text-2);
+}
+.color-preset-btn.active .color-preset-dot {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary), 0 2px 6px rgba(0,0,0,.35);
+}
+
 /* Export button group */
 .export-btn-group {
   position: relative; display: flex; align-items: center;
