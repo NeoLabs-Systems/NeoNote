@@ -4,12 +4,12 @@ services:
     image: neonote:local
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3010}:3010"
     volumes:
       - ./data:/app/data              # persist SQLite DB & sessions
     environment:
       NODE_ENV: ${NODE_ENV:-production}
-      PORT: 3000
+      PORT: 3010
       SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set in .env}
     env_file:
       - path: .env
