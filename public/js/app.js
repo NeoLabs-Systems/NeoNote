@@ -268,8 +268,14 @@ async function openNotebook(id) {
   state.activeNb = nb;
   dom.nbTitle.textContent = nb.title;
   dom.nbIcon.textContent  = nb.icon || '📓';
-  switchView('notebook');
   await loadPages(id);
+  /* Jump straight into the editor if the notebook has pages.
+     Only show the pages-grid for empty notebooks (so user can create the first page). */
+  if (state.activePages.length > 0) {
+    openPageEditor(state.activePages[0].id);
+  } else {
+    switchView('notebook');
+  }
 }
 
 async function loadPages(notebookId) {
@@ -354,6 +360,12 @@ async function openPageEditor(pageId) {
         $('btn-redo').disabled = !canRedo;
       },
       onLayersChange: (layers, activeIdx) => renderLayersPanel(layers, activeIdx),
+      onActivePageChange: (idx) => {
+        editorPageIdx = idx;
+        if (editorPages[idx]) {
+          $('editor-page-title').value = editorPages[idx].title || '';
+        }
+      },
     });
     applySettings(state.settings);
     bindCanvasEngineToolbar();
@@ -364,7 +376,25 @@ async function openPageEditor(pageId) {
     if (btnLog) btnLog.addEventListener('click', () => engine.copyDebugLog());
   }
 
-  await loadPageIntoEditor(editorPageIdx);
+  await loadAllPagesIntoEditor();
+}
+
+/* Load every page in the current notebook into the engine as a vertical stack. */
+async function loadAllPagesIntoEditor() {
+  if (!editorPages.length) return;
+  /* Remember which page to scroll to (set by openPageEditor or the caller) */
+  const targetIdx = Math.max(0, Math.min(editorPageIdx, editorPages.length - 1));
+  try {
+    if (engine) await engine.forceSave();
+    const allData = await Promise.all(editorPages.map(p => GET('/export/page/' + p.id)));
+    await engine.loadAllPages(allData);
+    /* Scroll to the requested page — loadAllPages always starts at page 0 */
+    if (targetIdx > 0) engine.scrollToPage(targetIdx);
+    $('editor-page-title').value = editorPages[editorPageIdx]?.title || '';
+  } catch (e) {
+    console.error('[NeoNote] loadAllPagesIntoEditor failed', e);
+    showToast('Failed to load notebook pages');
+  }
 }
 
 async function loadPageIntoEditor(idx) {
@@ -373,9 +403,13 @@ async function loadPageIntoEditor(idx) {
   const page = editorPages[idx];
 
   $('editor-page-title').value = page.title || '';
-  $('page-indicator').textContent = `${idx + 1} / ${editorPages.length}`;
-  $('btn-prev-page').disabled = (idx === 0);
-  $('btn-next-page').disabled = (idx === editorPages.length - 1);
+  /* page-indicator / prev/next buttons removed from UI — guard against null */
+  const pi = $('page-indicator');
+  if (pi) pi.textContent = `${idx + 1} / ${editorPages.length}`;
+  const pp = $('btn-prev-page');
+  if (pp) pp.disabled = (idx === 0);
+  const np = $('btn-next-page');
+  if (np) np.disabled = (idx === editorPages.length - 1);
 
   try {
     /* Flush any pending eraser deletions / stroke saves before loading new page */
@@ -625,9 +659,9 @@ function bindEditorToolbar() {
   /* Add layer */
   $('btn-add-layer').addEventListener('click', () => engine?.addLayer());
 
-  /* Page template button */
+  /* Page template button — use engine.pageId to always match the currently active page */
   $('btn-page-template').addEventListener('click', () => {
-    templateCtx = { mode: 'change', pageId: editorPages[editorPageIdx]?.id };
+    templateCtx = { mode: 'change', pageId: engine?.pageId || editorPages[editorPageIdx]?.id };
     openModal('modal-template');
   });
 
@@ -639,11 +673,7 @@ function bindEditorToolbar() {
     page.title = $('editor-page-title').value;
   });
 
-  /* Prev/next page */
-  $('btn-prev-page').addEventListener('click', () => { if (editorPageIdx > 0) loadPageIntoEditor(editorPageIdx - 1); });
-  $('btn-next-page').addEventListener('click', () => { if (editorPageIdx < editorPages.length - 1) loadPageIntoEditor(editorPageIdx + 1); });
-
-  /* Add page in editor */
+  /* Add page in editor — appends after the current active page then reloads the full stack */
   $('btn-add-page-editor').addEventListener('click', async () => {
     if (!editorNotebookId) return;
     try {
@@ -651,14 +681,16 @@ function bindEditorToolbar() {
       const firstPage = editorPages[0];
       const template  = firstPage?.template  || 'blank';
       const bgColor   = firstPage?.bg_color  || 'default';
-      const page = await POST('/pages', { notebookId: editorNotebookId, afterPageId: editorPages[editorPageIdx]?.id, template, bgColor });
-      editorPages.splice(editorPageIdx + 1, 0, page);
-      $('page-indicator').textContent = `${editorPageIdx + 1} / ${editorPages.length}`;
-      await loadPageIntoEditor(editorPageIdx + 1);
+      const insertAfterIdx = editorPageIdx;
+      const page = await POST('/pages', { notebookId: editorNotebookId, afterPageId: editorPages[insertAfterIdx]?.id, template, bgColor });
+      editorPages.splice(insertAfterIdx + 1, 0, page);
+      await loadAllPagesIntoEditor();
+      /* Scroll the viewport to the newly created page */
+      engine.scrollToPage(insertAfterIdx + 1);
     } catch (e) { showToast('Failed to add page'); }
   });
 
-  /* Delete current page in editor */
+  /* Delete current page in editor — reloads the full stack after deletion */
   $('btn-delete-page-editor').addEventListener('click', async () => {
     console.log('[NeoNote] Delete bin clicked', { editorPages, editorPageIdx });
     if (editorPages.length === 0) {
@@ -670,12 +702,13 @@ function bindEditorToolbar() {
     if (!confirm(`Delete "${label}"? This cannot be undone.`)) return;
     try {
       await DELETE('/pages/' + page.id);
-      editorPages.splice(editorPageIdx, 1);
+      const deletedIdx = editorPageIdx;
+      editorPages.splice(deletedIdx, 1);
       if (editorPages.length === 0) {
         closeEditor();
       } else {
-        const nextIdx = Math.min(editorPageIdx, editorPages.length - 1);
-        await loadPageIntoEditor(nextIdx);
+        await loadAllPagesIntoEditor();
+        engine.scrollToPage(Math.min(deletedIdx, editorPages.length - 1));
       }
       showToast('Page deleted');
     } catch (e) {
@@ -1236,7 +1269,7 @@ async function importPDF(file) {
       const afterId  = editorPages[editorPages.length - 1]?.id;
       const newPage  = await POST('/pages', { notebookId: editorNotebookId, afterPageId: afterId });
       editorPages.push(newPage);
-      $('page-indicator').textContent = `${editorPageIdx + 1} / ${editorPages.length}`;
+      /* page-indicator removed from UI: no update needed here */
 
       const layers  = await GET('/pages/' + newPage.id + '/layers');
       const layerId = layers[0]?.id;
@@ -1252,7 +1285,8 @@ async function importPDF(file) {
       }
     }
     /* Navigate to the first newly imported page */
-    await loadPageIntoEditor(firstNewIdx);
+    await loadAllPagesIntoEditor();
+    engine.scrollToPage(firstNewIdx);
     showToast(`PDF imported — ${total} page${total > 1 ? 's' : ''} added`);
   } catch (err) {
     console.error('[NeoNote] PDF import error', err);

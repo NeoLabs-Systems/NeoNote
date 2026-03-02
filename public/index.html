@@ -276,13 +276,6 @@
     </div>
     <div class="editor-topbar-center">
       <div class="page-nav">
-        <button class="btn-icon" id="btn-prev-page" title="Previous page">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-        </button>
-        <span class="page-indicator" id="page-indicator">1 / 1</span>
-        <button class="btn-icon" id="btn-next-page" title="Next page">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
-        </button>
         <button class="btn-icon" id="btn-add-page-editor" title="Add page">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
@@ -464,12 +457,7 @@
       <div class="canvas-viewport" id="canvas-viewport">
         <!-- Canvas layers rendered by JS -->
         <div class="page-canvas-container" id="page-canvas-container">
-          <!-- template canvas (bottom) -->
-          <canvas id="canvas-template" class="canvas-layer"></canvas>
-          <!-- per-layer canvases inserted here by JS -->
-          <canvas id="canvas-active" class="canvas-layer canvas-active-layer"></canvas>
-          <!-- selection / overlay canvas (top) -->
-          <canvas id="canvas-overlay" class="canvas-layer canvas-overlay-layer"></canvas>
+          <!-- Page frames with canvases are built dynamically by JS (multi-page vertical stack) -->
         </div>
       </div>
       <!-- Floating selection toolbar (shown when items are selected) -->

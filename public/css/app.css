@@ -843,14 +843,20 @@ a:hover      { text-decoration: underline; }
   will-change: transform;
 }
 
+/* Container holds all page-frame divs; size set by JS */
 .page-canvas-container {
   position: relative;
-  box-shadow: 0 0 0 1px var(--border-mid), 0 20px 60px rgba(0,0,0,.8);
+  background: transparent;
+}
+
+/* Each page in the vertical stack gets its own shadow and rounded corners */
+.page-frame {
   border-radius: 2px;
+  box-shadow: 0 0 0 1px var(--border-mid), 0 12px 40px rgba(0,0,0,.65);
   overflow: hidden;
   background: #fff;
 }
-[data-theme="dark"] .page-canvas-container { background: #1a1a2e; }
+[data-theme="dark"] .page-frame { background: #1a1a2e; }
 
 .canvas-layer {
   position: absolute; top: 0; left: 0;

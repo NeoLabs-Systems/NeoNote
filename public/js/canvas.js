@@ -21,23 +21,31 @@ export class CanvasEngine {
     this.onStatusUpdate = opts.onStatusUpdate || (() => {});
     this.onUndoRedoUpdate = opts.onUndoRedoUpdate || (() => {});
     this.onLayersChange = opts.onLayersChange || (() => {});
+    this.onActivePageChange = opts.onActivePageChange || null;
+    this.onActivePageChange = opts.onActivePageChange || null;
+    this.onActivePageChange = opts.onActivePageChange || null;
 
     /* Page dimensions (logical, in CSS px at 100% zoom) */
     this.pageW = 1404;
     this.pageH = 1872;
 
-    /* Canvas DOM nodes */
-    this.templateCanvas  = document.getElementById('canvas-template');
-    this.activeCanvas    = document.getElementById('canvas-active');
-    this.overlayCanvas   = document.getElementById('canvas-overlay');
-    this.container       = document.getElementById('page-canvas-container');
+    /* Canvas DOM nodes — set to null until first loadAllPages() call */
+    this.templateCanvas  = null;
+    this.activeCanvas    = null;
+    this.overlayCanvas   = null;
+    this.container       = null;  /* active page's .page-frame element */
+    this.pagesContainer  = document.getElementById('page-canvas-container');
     this.viewport        = document.getElementById('canvas-viewport');
     this.canvasArea      = document.getElementById('canvas-area');
 
-    /* Contexts */
-    this.tCtx = this.templateCanvas.getContext('2d');
-    this.aCtx = this.activeCanvas.getContext('2d');
-    this.oCtx = this.overlayCanvas.getContext('2d');
+    /* Contexts — set to null until first loadAllPages() call */
+    this.tCtx = null;
+    this.aCtx = null;
+    this.oCtx = null;
+
+    /* Multi-page state */
+    this._pages         = [];   /* [{pageId, pageW, pageH, template, bgColor, yOffset, frame, templateCanvas, tCtx, activeCanvas, aCtx, overlayCanvas, oCtx, layers, activeLayerIdx, strokes, images}] */
+    this._activePageIdx = 0;
 
     /* Layer canvases: [{id, name, canvas, ctx, visible, locked, opacity}] */
     this.layers       = [];
@@ -144,24 +152,89 @@ export class CanvasEngine {
   /* ═══════════════════════════════════════════════════════════
      INIT / LOAD PAGE
      ═══════════════════════════════════════════════════════════ */
+  /* Backward-compat single-page wrapper */
   async loadPage(pageData) {
-    /* Stop any in-progress stroke/erase so it doesn't bleed into the new page */
-    this._drawing          = false;
+    return this.loadAllPages([pageData]);
+  }
+
+  /* Load one or more pages and display them stacked vertically. */
+  async loadAllPages(allPagesData) {
+    /* Stop any in-progress stroke */
+    this._drawing = false;
     this._drawingPointerId = null;
-    this._points           = [];
-    this._panning          = false;
-    this.aCtx?.clearRect(0, 0, this.pageW, this.pageH);
-    this.oCtx?.clearRect(0, 0, this.pageW, this.pageH);
+    this._points = [];
+    this._panning = false;
+    if (this.aCtx) { this.aCtx.clearRect(0, 0, this.pageW, this.pageH); }
+    if (this.oCtx) { this.oCtx.clearRect(0, 0, this.pageW, this.pageH); }
 
-    this.pageId     = pageData.page.id;
-    this.notebookId = pageData.page.notebook_id;
-    this.pageW      = pageData.page.width;
-    this.pageH      = pageData.page.height;
-    this.template   = pageData.page.template;
-    this.bgColor    = pageData.page.bg_color;
+    /* Remove previous page frames from DOM */
+    this._pages.forEach(pg => {
+      if (pg.frame?.parentNode) pg.frame.parentNode.removeChild(pg.frame);
+    });
+    this._pages = [];
 
-    /* Reset state — normalize snake_case DB columns to camelCase */
-    this._strokes = (pageData.strokes || []).map(s => ({
+    this._undoStack = [];
+    this._redoStack = [];
+    this._savePending = [];
+    this._deletePending = [];
+    this.onUndoRedoUpdate(false, false);
+
+    const PAGE_GAP = 40;
+    let yOffset = 0;
+
+    for (const pageData of allPagesData) {
+      const pg = await this._buildPageFrame(pageData, yOffset);
+      this._pages.push(pg);
+      yOffset += pg.pageH + PAGE_GAP;
+    }
+
+    /* Size the viewport container to cover all page frames */
+    const totalH = Math.max(1, yOffset - PAGE_GAP);
+    const maxW   = Math.max(1, ...this._pages.map(pg => pg.pageW));
+    this.pagesContainer.style.width  = maxW + 'px';
+    this.pagesContainer.style.height = totalH + 'px';
+
+    /* Activate first page — sets this.activeCanvas, this.layers, etc. */
+    this._switchActivePage(0);
+
+    this._fitToScreen();
+    this._renderAllPages();
+    this.onLayersChange(this.layers, this.activeLayerIdx);
+  }
+
+  /* Build one page's DOM frame + canvases. Returns a page record. */
+  async _buildPageFrame(pageData, yOffset) {
+    const p = pageData.page;
+    const W = p.width  || 1404;
+    const H = p.height || 1872;
+
+    /* Outer frame div — positioned absolutely within pagesContainer */
+    const frame = document.createElement('div');
+    frame.className = 'page-frame';
+    frame.style.cssText = `position:absolute;top:${yOffset}px;left:0;width:${W}px;height:${H}px;overflow:hidden;`;
+    this.pagesContainer.appendChild(frame);
+
+    /* Template canvas (bottom) */
+    const templateCanvas = document.createElement('canvas');
+    templateCanvas.width  = W; templateCanvas.height = H;
+    templateCanvas.style.cssText = `position:absolute;top:0;left:0;width:${W}px;height:${H}px;`;
+    frame.appendChild(templateCanvas);
+
+    /* Active (drawing) canvas */
+    const activeCanvas = document.createElement('canvas');
+    activeCanvas.width  = W; activeCanvas.height = H;
+    activeCanvas.className = 'canvas-active-layer';
+    activeCanvas.style.cssText = `position:absolute;top:0;left:0;width:${W}px;height:${H}px;touch-action:none;user-select:none;`;
+    /* (layer canvases inserted between template and active by _buildPageLayers) */
+
+    /* Overlay canvas (top) */
+    const overlayCanvas = document.createElement('canvas');
+    overlayCanvas.width  = W; overlayCanvas.height = H;
+    overlayCanvas.className = 'canvas-overlay-layer';
+    overlayCanvas.style.cssText = `position:absolute;top:0;left:0;width:${W}px;height:${H}px;pointer-events:none;`;
+
+    /* Strokes / images for this page (normalized from snake_case) */
+    const strokes = (pageData.strokes || []).map(s => ({
       id:        s.id,
       layerId:   s.layerId   ?? s.layer_id,
       pageId:    s.pageId    ?? s.page_id,
@@ -174,7 +247,7 @@ export class CanvasEngine {
       bbox:      s.bbox      ?? null,
       extra:     s.extra     ?? null,
     }));
-    this._images = (pageData.images || []).map(img => ({
+    const images = (pageData.images || []).map(img => ({
       id:       img.id,
       layerId:  img.layerId  ?? img.layer_id,
       pageId:   img.pageId   ?? img.page_id,
@@ -185,80 +258,167 @@ export class CanvasEngine {
       height:   img.height   ?? 300,
       rotation: img.rotation ?? 0,
     }));
-    this._undoStack = [];
-    this._redoStack = [];
-    this._savePending   = [];
-    this._deletePending = [];
-    this.onUndoRedoUpdate(false, false);
 
-    /* Build layers */
-    await this._buildLayers(pageData.layers || []);
+    const pg = {
+      /* identity */
+      pageId:    p.id,
+      notebookId: p.notebook_id,
+      pageW:     W,
+      pageH:     H,
+      template:  p.template || 'blank',
+      bgColor:   p.bg_color || 'default',
+      yOffset,
+      /* DOM */
+      frame,
+      templateCanvas,
+      tCtx: templateCanvas.getContext('2d'),
+      activeCanvas,
+      aCtx: activeCanvas.getContext('2d'),
+      overlayCanvas,
+      oCtx: overlayCanvas.getContext('2d'),
+      /* data */
+      strokes,
+      images,
+      /* layers — filled by _buildPageLayers */
+      layers: [],
+      activeLayerIdx: 0,
+    };
 
-    /* Fit to screen */
-    this._fitToScreen();
+    await this._buildPageLayers(pg, pageData.layers || []);
 
-    /* Render all */
-    this._renderTemplate();
-    this._renderAll();
-    this.onLayersChange(this.layers, this.activeLayerIdx);
+    /* Insert active + overlay after layer canvases */
+    frame.appendChild(activeCanvas);
+    frame.appendChild(overlayCanvas);
+
+    this._bindPageCanvasEvents(pg);
+
+    return pg;
   }
 
-  async _buildLayers(layerDefs) {
-    /* Remove old layer canvases */
-    this.layers.forEach(l => {
-      if (l.canvas && l.canvas.parentNode) l.canvas.parentNode.removeChild(l.canvas);
+  async _buildPageLayers(pg, layerDefs) {
+    /* Remove existing layer canvases if rebuilding */
+    pg.layers.forEach(l => {
+      if (l.canvas?.parentNode) l.canvas.parentNode.removeChild(l.canvas);
     });
-    this.layers = [];
+    pg.layers = [];
 
-    /* Sort */
     layerDefs = [...layerDefs].sort((a, b) => a.sort_order - b.sort_order);
 
-    for (let i = 0; i < layerDefs.length; i++) {
-      const ld = layerDefs[i];
+    for (const ld of layerDefs) {
       const canvas = document.createElement('canvas');
-      canvas.width  = this.pageW;
-      canvas.height = this.pageH;
-      canvas.style.cssText = `position:absolute;top:0;left:0;width:${this.pageW}px;height:${this.pageH}px;`;
+      canvas.width  = pg.pageW;
+      canvas.height = pg.pageH;
+      canvas.style.cssText = `position:absolute;top:0;left:0;width:${pg.pageW}px;height:${pg.pageH}px;`;
       canvas.dataset.layerId = ld.id;
-      /* Insert before active/overlay canvas */
-      this.container.insertBefore(canvas, this.activeCanvas);
-
-      this.layers.push({
-        id:       ld.id,
-        name:     ld.name,
-        visible:  ld.visible !== 0,
-        locked:   ld.locked  === 1,
-        opacity:  ld.opacity ?? 1.0,
+      /* Append after template canvas — active/overlay appended later in _buildPageFrame */
+      pg.frame.appendChild(canvas);
+      pg.layers.push({
+        id:        ld.id,
+        name:      ld.name,
+        visible:   ld.visible !== 0,
+        locked:    ld.locked  === 1,
+        opacity:   ld.opacity ?? 1.0,
         sortOrder: ld.sort_order,
         canvas,
         ctx: canvas.getContext('2d'),
+        _pageRef:  pg,   /* back-reference so _renderLayer can find page strokes/dims */
       });
     }
+    pg.activeLayerIdx = Math.max(0, pg.layers.length - 1);
+  }
 
-    /* Set canvases to page size */
-    [this.templateCanvas, this.activeCanvas, this.overlayCanvas].forEach(c => {
-      c.width  = this.pageW;
-      c.height = this.pageH;
-      c.style.width  = this.pageW + 'px';
-      c.style.height = this.pageH + 'px';
-    });
-    this.container.style.width  = this.pageW + 'px';
-    this.container.style.height = this.pageH + 'px';
+  /* Bind per-page canvas pointer events. Pointerdown first switches active page. */
+  _bindPageCanvasEvents(pg) {
+    const canvas = pg.activeCanvas;
+    canvas.addEventListener('pointerdown', e => {
+      const idx = this._pages.indexOf(pg);
+      if (idx >= 0 && idx !== this._activePageIdx) this._switchActivePage(idx);
+      this._onDown(e);
+    }, { passive: false });
+    canvas.addEventListener('pointermove',  e => this._onMove(e),   { passive: false });
+    canvas.addEventListener('pointerup',    e => this._onUp(e),     { passive: false });
+    canvas.addEventListener('pointerleave', e => {
+      if (e.pointerType === 'mouse') this._onUp(e);
+      if (e.pointerType === 'pen') {
+        clearTimeout(this._penNearbyTimer);
+        this._penNearby = false;
+      }
+      if (this.tool === 'eraser' && pg === this._pages[this._activePageIdx]) {
+        pg.oCtx.clearRect(0, 0, pg.pageW, pg.pageH);
+      }
+    }, { passive: false });
+    canvas.addEventListener('pointercancel', e => this._onCancel(e), { passive: false });
+    canvas.addEventListener('contextmenu',   e => e.preventDefault());
+    canvas.addEventListener('dblclick',      e => this._onDblClick(e));
+    /* Track pen proximity */
+    canvas.addEventListener('pointermove', e => {
+      if (e.pointerType === 'pen') {
+        this._penNearby = true;
+        clearTimeout(this._penNearbyTimer);
+        this._penNearbyTimer = setTimeout(() => { this._penNearby = false; }, 800);
+      }
+    }, { passive: true });
+  }
 
-    /* Active layer = topmost non-locked */
-    this.activeLayerIdx = Math.max(0, this.layers.length - 1);
+  /* Switch which page is "active" — updates all this.* shortcut refs. */
+  _switchActivePage(idx) {
+    if (!this._pages.length) return;
+    idx = Math.max(0, Math.min(idx, this._pages.length - 1));
+    this._activePageIdx = idx;
+    const pg = this._pages[idx];
+    this.pageId      = pg.pageId;
+    this.notebookId  = pg.notebookId;
+    this.pageW       = pg.pageW;
+    this.pageH       = pg.pageH;
+    this.template    = pg.template;
+    this.bgColor     = pg.bgColor;
+    this.container   = pg.frame;
+    this.templateCanvas = pg.templateCanvas;
+    this.tCtx        = pg.tCtx;
+    this.activeCanvas = pg.activeCanvas;
+    this.aCtx        = pg.aCtx;
+    this.overlayCanvas = pg.overlayCanvas;
+    this.oCtx        = pg.oCtx;
+    this.layers      = pg.layers;
+    this.activeLayerIdx = pg.activeLayerIdx;
+    this._strokes    = pg.strokes;
+    this._images     = pg.images;
+    this.onLayersChange(this.layers, this.activeLayerIdx);
+    if (this.onActivePageChange) this.onActivePageChange(idx);
+  }
+
+  /* Animate the viewport so that page [idx] is centered/top-aligned. */
+  scrollToPage(idx) {
+    if (!this._pages.length) return;
+    idx = Math.max(0, Math.min(idx, this._pages.length - 1));
+    const pg = this._pages[idx];
+    const area = this.canvasArea;
+    /* Position the top of the target page 20px below the top of the area */
+    this.offsetY = 20 - pg.yOffset * this.scale;
+    this.offsetX = Math.round((area.clientWidth - pg.pageW * this.scale) / 2);
+    this._switchActivePage(idx);
+    this._applyTransform();
+  }
+
+  /* _buildLayers kept for internal compatibility — delegates to active page record */
+  async _buildLayers(layerDefs) {
+    const pg = this._pages[this._activePageIdx];
+    if (pg) await this._buildPageLayers(pg, layerDefs);
   }
 
   /* ═══════════════════════════════════════════════════════════
      RENDER
      ═══════════════════════════════════════════════════════════ */
-  _renderTemplate() {
-    const ctx = this.tCtx;
-    const W = this.pageW, H = this.pageH;
+  _renderTemplate(opts = {}) {
+    const ctx      = opts.ctx      ?? this.tCtx;
+    const W        = opts.pageW    ?? this.pageW;
+    const H        = opts.pageH    ?? this.pageH;
+    const template = opts.template ?? this.template ?? 'blank';
+    const bgColor  = opts.bgColor  ?? this.bgColor  ?? 'default';
     ctx.clearRect(0, 0, W, H);
 
     /* Background — always fill so canvas is never transparent/black */
-    ctx.fillStyle = (this.bgColor && this.bgColor !== 'default') ? this.bgColor : '#ffffff';
+    ctx.fillStyle = (bgColor && bgColor !== 'default') ? bgColor : '#ffffff';
     ctx.fillRect(0, 0, W, H);
 
     ctx.save();
@@ -266,7 +426,7 @@ export class CanvasEngine {
     ctx.strokeStyle = '#888';
     ctx.lineWidth   = 1;
 
-    switch (this.template) {
+    switch (template) {
       case 'lined':
         for (let y = 60; y < H; y += 32) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
         ctx.strokeStyle = '#e05'; ctx.globalAlpha = 0.1;
@@ -336,11 +496,23 @@ export class CanvasEngine {
   }
 
   _renderLayer(layerObj) {
-    const ctx = layerObj.ctx;
-    ctx.clearRect(0, 0, this.pageW, this.pageH);
-    const layerStrokes = this._strokes.filter(s => s.layerId === layerObj.id);
-    const layerImages  = this._images.filter(i => i.layerId === layerObj.id);
-    console.log('[NoteNeo] _renderLayer id:', layerObj.id, '| matched strokes:', layerStrokes.length, '| total strokes:', this._strokes.length, '| unique layerIds in strokes:', [...new Set(this._strokes.map(s=>s.layerId))]);
+    const pg      = layerObj._pageRef;
+    const ctx     = layerObj.ctx;
+    const W       = pg ? pg.pageW   : this.pageW;
+    const H       = pg ? pg.pageH   : this.pageH;
+    /* For the active page always use this._strokes / this._images — these stay
+       up-to-date after undo, erase, move, etc. (which reassign this._strokes to a
+       new filtered/mapped array without touching pg.strokes).  For non-active pages
+       use pg.strokes, which is fresh from the server at loadAllPages time and is never
+       mutated while that page is not active. */
+    const isActivePg = pg && (pg === this._pages[this._activePageIdx]);
+    const strokes = (!pg || isActivePg) ? this._strokes : pg.strokes;
+    const images  = (!pg || isActivePg) ? this._images  : pg.images;
+
+    ctx.clearRect(0, 0, W, H);
+    const layerStrokes = strokes.filter(s => s.layerId === layerObj.id);
+    const layerImages  = images.filter(i => i.layerId === layerObj.id);
+    console.log('[NoteNeo] _renderLayer id:', layerObj.id, '| matched strokes:', layerStrokes.length, '| total strokes:', strokes.length, '| unique layerIds in strokes:', [...new Set(strokes.map(s=>s.layerId))]);
 
     /* Images first */
     layerImages.forEach(img => this._renderImage(ctx, img));
@@ -350,6 +522,20 @@ export class CanvasEngine {
 
   _renderAll() {
     this.layers.forEach(l => this._renderLayer(l));
+  }
+
+  /* Render templates + layers for every page in the notebook. */
+  _renderAllPages() {
+    this._pages.forEach(pg => {
+      this._renderTemplate({
+        ctx:      pg.tCtx,
+        pageW:    pg.pageW,
+        pageH:    pg.pageH,
+        template: pg.template,
+        bgColor:  pg.bgColor,
+      });
+      pg.layers.forEach(l => this._renderLayer(l));
+    });
   }
 
   _renderStroke(ctx, stroke) {
@@ -517,7 +703,13 @@ export class CanvasEngine {
     this.scale      = Math.max(0.05, Math.min(aw / this.pageW, ah / this.pageH, 1.5));
     this._fitScale  = this.scale;
     this.offsetX    = Math.round((area.clientWidth  - this.pageW * this.scale) / 2);
-    this.offsetY    = Math.round((area.clientHeight - this.pageH * this.scale) / 2);
+    /* For multi-page notebooks position the first page near the top.
+       For a single page keep it vertically centred. */
+    if (this._pages.length > 1) {
+      this.offsetY = 20;
+    } else {
+      this.offsetY = Math.round((area.clientHeight - this.pageH * this.scale) / 2);
+    }
     this._applyTransform();
   }
 
@@ -576,33 +768,17 @@ export class CanvasEngine {
      POINTER EVENTS
      ═══════════════════════════════════════════════════════════ */
   _bindEvents() {
-    const canvas = this.activeCanvas;
+    /* Per-page canvas pointer events (pointerdown/move/up/leave/cancel, contextmenu,
+       pen proximity tracking, dblclick) are wired in _bindPageCanvasEvents() when
+       each page frame is built.  touch-action:none is also set per-page canvas.
 
-    /* Critical for tablets/stylus: without touch-action:none the browser fires
-       pointercancel within milliseconds of every touch, treating it as a scroll
-       gesture and ending the stroke before it has any points. */
-    canvas.style.touchAction = 'none';
-    canvas.style.userSelect  = 'none';
+       _bindEvents only wires the shared / global listeners:
+         • document-level pointerup / pointercancel  (iPad fallback)
+         • canvasArea wheel  (zoom)
+         • canvasArea touch events  (pan + pinch-zoom)
+         • document keydown  (keyboard shortcuts) */
+
     this.canvasArea.style.touchAction = 'none';
-
-    /* NOTE: We do NOT attach a touchstart→preventDefault listener on the canvas
-       element itself. touch-action:none (above) already tells the browser not to
-       claim any touch gestures, making the preventDefault redundant. More critically,
-       calling e.preventDefault() on a stylus/pen touchstart SUPPRESSES the
-       corresponding pointer events on both iOS Safari and some Android Chrome builds,
-       making the pen unable to draw. The canvasArea touchstart handler below handles
-       finger pan/pinch-zoom and only calls preventDefault for confirmed finger input. */
-
-    canvas.addEventListener('pointerdown',  e => this._onDown(e),   { passive: false });
-    canvas.addEventListener('pointermove',  e => this._onMove(e),   { passive: false });
-    canvas.addEventListener('pointerup',    e => this._onUp(e),     { passive: false });
-    /* pointerleave: only end mouse strokes — pen/touch always fire pointerup/pointercancel
-       so we must NOT call _onUp here for stylus, otherwise mid-stroke OS hover events
-       (common on iPad/Android tablets) cut every stroke into tiny segments. */
-    canvas.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') this._onUp(e); }, { passive: false });
-    /* pointercancel: the browser took over the gesture (e.g. system gesture, screenshot).
-       Discard the in-progress stroke cleanly rather than committing a partial one. */
-    canvas.addEventListener('pointercancel', e => this._onCancel(e), { passive: false });
 
     /* Document-level fallback for pointerup/pointercancel: on some tablets (iPadOS especially)
        the canvas element may not reliably receive pointerup when using setPointerCapture.
@@ -624,8 +800,8 @@ export class CanvasEngine {
     /* Keyboard shortcuts */
     document.addEventListener('keydown', e => this._onKey(e));
 
-    /* Context menu prevent */
-    canvas.addEventListener('contextmenu', e => e.preventDefault());
+    /* Context menu on the canvasArea (per-page canvases handle their own via _bindPageCanvasEvents). */
+    this.canvasArea.addEventListener('contextmenu', e => e.preventDefault());
 
     /* ── Unified touch gesture system ─────────────────────────────
        ALL finger-based panning (1-finger) and pinch-zoom (2-finger) is handled
@@ -806,30 +982,8 @@ export class CanvasEngine {
       }
     });
 
-    /* Double-click: re-edit existing text strokes */
-    canvas.addEventListener('dblclick', e => this._onDblClick(e));
-
-    /* Clear eraser ring when pointer leaves canvas */
-    canvas.addEventListener('pointerleave', () => {
-      if (this.tool === 'eraser') this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
-    });
-
-    /* Track pen/stylus proximity for one-finger scroll logic.
-       Stylus hover fires pointermove with pointerType='pen' and pressure=0. */
-    canvas.addEventListener('pointermove', e => {
-      if (e.pointerType === 'pen') {
-        this._penNearby = true;
-        clearTimeout(this._penNearbyTimer);
-        /* Clear after 800 ms of no pen signal — pen moved away */
-        this._penNearbyTimer = setTimeout(() => { this._penNearby = false; }, 800);
-      }
-    }, { passive: true });
-    canvas.addEventListener('pointerleave', e => {
-      if (e.pointerType === 'pen') {
-        clearTimeout(this._penNearbyTimer);
-        this._penNearby = false;
-      }
-    });
+    /* dblclick, eraser-ring clearing, and pen proximity are
+       all handled per-page in _bindPageCanvasEvents — nothing needed here. */
 
     /* Selection toolbar buttons */
     const stb = this._selectToolbar;
@@ -870,11 +1024,14 @@ export class CanvasEngine {
   }
 
   _screenToPage(x, y) {
-    /* Convert screen coords to page-local coords */
+    /* Convert screen coords to page-local coords.
+       For multi-page notebooks the active page frame is offset vertically
+       inside canvas-viewport, so we subtract its yOffset. */
     const rect = this.canvasArea.getBoundingClientRect();
     const sx = (x - rect.left - this.offsetX) / this.scale;
     const sy = (y - rect.top  - this.offsetY) / this.scale;
-    return { x: sx, y: sy };
+    const pg = this._pages[this._activePageIdx];
+    return { x: sx, y: sy - (pg?.yOffset ?? 0) };
   }
 
   _onDown(e) {
@@ -2046,9 +2203,11 @@ export class CanvasEngine {
     canvas.style.cssText = `position:absolute;top:0;left:0;width:${this.pageW}px;height:${this.pageH}px;`;
     canvas.dataset.layerId = ld.id;
     this.container.insertBefore(canvas, this.activeCanvas);
+    const pg = this._pages[this._activePageIdx];
     this.layers.push({
       id: ld.id, name: ld.name, visible: true, locked: false, opacity: 1.0, sortOrder: ld.sort_order,
       canvas, ctx: canvas.getContext('2d'),
+      _pageRef: pg,   /* needed by _renderLayer to find page strokes/dims */
     });
     this.activeLayerIdx = this.layers.length - 1;
     this.onLayersChange(this.layers, this.activeLayerIdx);
@@ -2059,7 +2218,11 @@ export class CanvasEngine {
     const l = this.layers[idx];
     await fetch(`/api/pages/${this.pageId}/layers/${l.id}`, { method: 'DELETE' });
     if (l.canvas.parentNode) l.canvas.parentNode.removeChild(l.canvas);
-    this._strokes = this._strokes.filter(s => s.layerId !== l.id);
+    const filtered = this._strokes.filter(s => s.layerId !== l.id);
+    /* Update both the instance ref AND the page record so _renderAllPages stays in sync */
+    this._strokes = filtered;
+    const pg = this._pages[this._activePageIdx];
+    if (pg) pg.strokes = filtered;
     this.layers.splice(idx, 1);
     this.activeLayerIdx = Math.min(this.activeLayerIdx, this.layers.length - 1);
     this.onLayersChange(this.layers, this.activeLayerIdx);
