@@ -589,26 +589,39 @@ export class CanvasEngine {
         e.preventDefault();
         const t = e.touches;
         const now = Date.now();
-        /* Pan: move based on midpoint delta */
-        const mx1 = (t[0].clientX + t[1].clientX) / 2;
-        const my1 = (t[0].clientY + t[1].clientY) / 2;
+
         const mx0 = (_lastTouches[0].clientX + _lastTouches[1].clientX) / 2;
         const my0 = (_lastTouches[0].clientY + _lastTouches[1].clientY) / 2;
+        const mx1 = (t[0].clientX + t[1].clientX) / 2;
+        const my1 = (t[0].clientY + t[1].clientY) / 2;
         const dx = mx1 - mx0, dy = my1 - my0;
-        this.offsetX += dx; this.offsetY += dy;
+
+        const d1 = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+        const d0 = Math.hypot(_lastTouches[0].clientX - _lastTouches[1].clientX, _lastTouches[0].clientY - _lastTouches[1].clientY);
+
+        /* Combined pan + zoom in one atomic step so the two transforms never
+           interfere.  The page point that was under the OLD midpoint ends up
+           exactly under the NEW midpoint, with the correct scale applied. */
+        const rect = this.canvasArea.getBoundingClientRect();
+        const cx0 = mx0 - rect.left;
+        const cy0 = my0 - rect.top;
+        const cx1 = mx1 - rect.left;
+        const cy1 = my1 - rect.top;
+        const newScale = (d0 > 1)
+          ? Math.max(0.05, Math.min(10, this.scale * d1 / d0))
+          : this.scale;
+        const ratio = newScale / this.scale;
+        this.offsetX = cx1 - (cx0 - this.offsetX) * ratio;
+        this.offsetY = cy1 - (cy0 - this.offsetY) * ratio;
+        this.scale   = newScale;
+
         /* Track velocity for inertia (pixels/ms) */
         const dt = Math.max(1, now - _lastTouches[0].t);
         this._panVelX = dx / dt;
         this._panVelY = dy / dt;
         this._panLastT = now;
-        /* Pinch zoom — zoom around midpoint of current touches */
-        const d1 = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-        const d0 = Math.hypot(_lastTouches[0].clientX - _lastTouches[1].clientX, _lastTouches[0].clientY - _lastTouches[1].clientY);
-        if (d0 > 1) {
-          this.setZoom(this.scale * d1 / d0, mx1, my1);
-        } else {
-          this._applyTransform();
-        }
+
+        this._applyTransform();
         _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY, t: now }));
       }
     }, { passive: false });
@@ -1665,8 +1678,8 @@ export class CanvasEngine {
     const MS_PER_FRAME = 16;
     let velX = vx * MS_PER_FRAME;
     let velY = vy * MS_PER_FRAME;
-    const FRICTION = 0.92;
-    const MIN_VEL  = 0.3;
+    const FRICTION = 0.96;
+    const MIN_VEL  = 0.08;
     const step = () => {
       velX *= FRICTION;
       velY *= FRICTION;
