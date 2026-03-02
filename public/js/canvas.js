@@ -577,14 +577,20 @@ export class CanvasEngine {
     let _areaRect    = null;   /* cached once per gesture so layout queries don't race */
     this.canvasArea.addEventListener('touchstart', e => {
       if (e.touches.length === 2) {
-        /* Snapshot the area rect NOW while layout is stable */
-        _areaRect    = this.canvasArea.getBoundingClientRect();
-        _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY, t: Date.now() }));
-        /* Fully kill any active 1-finger pan state so it can't interfere */
+        /* If a single-finger pan was in progress, roll back any offset drift it
+           caused before the second finger arrived — that drift is the "jump". */
+        if (this._panning && this._panStart) {
+          this.offsetX = this._panStart.ox;
+          this.offsetY = this._panStart.oy;
+        }
+        /* Fully kill any active 1-finger pan state */
         this._panning  = false;
         this._panStart = null;
         this._stopInertia();
         this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
+        /* Snapshot the area rect NOW while layout is stable */
+        _areaRect    = this.canvasArea.getBoundingClientRect();
+        _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY, t: Date.now() }));
         e.preventDefault();
       }
     }, { passive: false });
