@@ -112,6 +112,28 @@ export class CanvasEngine {
     /* Set to true while a 2-finger gesture is active — blocks pointer-event pan */
     this._twoFingerActive = false;
 
+    /* True from the moment a pen pointerdown fires until pointerup/cancel.
+       Used to detect stylus-sourced touch events on Android Chrome (which has no
+       touchType property) and skip e.preventDefault() so pointer events survive. */
+    this._penPointerActive = false;
+
+    /* Debug log buffer — stores the last 200 [NoteNeo]-tagged console messages
+       so they can be copied to clipboard on devices without DevTools. */
+    this._debugLog = [];
+    (() => {
+      const origLog  = console.log.bind(console);
+      const origWarn = console.warn.bind(console);
+      const capture  = (level, args) => {
+        if (typeof args[0] === 'string' && args[0].includes('[NoteNeo]')) {
+          const ts = new Date().toISOString().slice(11, 23);
+          this._debugLog.push(`[${ts}][${level}] ` + args.map(String).join(' '));
+          if (this._debugLog.length > 200) this._debugLog.shift();
+        }
+      };
+      console.log  = (...a) => { capture('LOG',  a); origLog(...a); };
+      console.warn = (...a) => { capture('WARN', a); origWarn(...a); };
+    })();
+
     /* Selection toolbar element */
     this._selectToolbar = document.getElementById('select-toolbar');
     this._selectionBbox = null;
@@ -318,6 +340,7 @@ export class CanvasEngine {
     ctx.clearRect(0, 0, this.pageW, this.pageH);
     const layerStrokes = this._strokes.filter(s => s.layerId === layerObj.id);
     const layerImages  = this._images.filter(i => i.layerId === layerObj.id);
+    console.log('[NoteNeo] _renderLayer id:', layerObj.id, '| matched strokes:', layerStrokes.length, '| total strokes:', this._strokes.length, '| unique layerIds in strokes:', [...new Set(this._strokes.map(s=>s.layerId))]);
 
     /* Images first */
     layerImages.forEach(img => this._renderImage(ctx, img));
@@ -524,6 +547,31 @@ export class CanvasEngine {
 
   fitToScreen() { this._fitToScreen(); }
 
+  /* UUID helper — crypto.randomUUID() is only available in Chrome ≥92 / Safari ≥15.4.
+     Fall back to a Math.random-based UUID v4 on older Android WebViews. */
+  _uuid() {
+    if (crypto.randomUUID) return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  /* Copy the buffered [NoteNeo] debug log to the system clipboard.
+     Useful on mobile devices where DevTools is unavailable. */
+  copyDebugLog() {
+    const text = this._debugLog.length
+      ? this._debugLog.join('\n')
+      : '(no debug entries yet — try drawing a stroke first)';
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(() => alert('Debug log copied!\n\n' + this._debugLog.slice(-5).join('\n')))
+        .catch(() => prompt('Copy this log:', text));
+    } else {
+      prompt('Copy this log:', text);
+    }
+  }
+
   /* ═══════════════════════════════════════════════════════════
      POINTER EVENTS
      ═══════════════════════════════════════════════════════════ */
@@ -537,9 +585,13 @@ export class CanvasEngine {
     canvas.style.userSelect  = 'none';
     this.canvasArea.style.touchAction = 'none';
 
-    /* Block native touch handling on the canvas before pointer events are dispatched.
-       Important on iOS Safari where touchstart fires before pointerdown. */
-    canvas.addEventListener('touchstart', e => e.preventDefault(), { passive: false });
+    /* NOTE: We do NOT attach a touchstart→preventDefault listener on the canvas
+       element itself. touch-action:none (above) already tells the browser not to
+       claim any touch gestures, making the preventDefault redundant. More critically,
+       calling e.preventDefault() on a stylus/pen touchstart SUPPRESSES the
+       corresponding pointer events on both iOS Safari and some Android Chrome builds,
+       making the pen unable to draw. The canvasArea touchstart handler below handles
+       finger pan/pinch-zoom and only calls preventDefault for confirmed finger input. */
 
     canvas.addEventListener('pointerdown',  e => this._onDown(e),   { passive: false });
     canvas.addEventListener('pointermove',  e => this._onMove(e),   { passive: false });
@@ -588,23 +640,28 @@ export class CanvasEngine {
     this.canvasArea.addEventListener('touchstart', e => {
       const n = e.touches.length;
       if (n === 0) return;
-      e.preventDefault();
+
+      /* ── Stylus / Apple Pencil / Android pen guard ──────────────
+         Calling e.preventDefault() on a stylus touchstart suppresses pointer
+         events for that contact — pointerdown never fires, pen cannot draw.
+         • iOS Safari:     touchType === 'stylus' (available before pointerdown)
+         • Chrome Android: _penPointerActive flag (set by pen pointerdown, which
+           fires BEFORE touchstart on Android — opposite order to iOS) */
+      if (n === 1 && (e.touches[0].touchType === 'stylus' || this._penPointerActive)) return;
 
       /* ── 2+ fingers: start / restart pinch-zoom ────────────── */
       if (n >= 2) {
+        e.preventDefault();
         /* Mark active so pointer events back off completely */
         this._twoFingerActive = true;
         this._panning  = false;
         this._panStart = null;
         this._stopInertia();
-        /* Cancel any in-progress touch drawing that the first finger might have
-           started via pointer events before we realized it's a multi-touch gesture */
-        if (this._drawing && this._drawingPointerId != null) {
-          this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
-          this._drawing = false;
-          this._drawingPointerId = null;
-          this._points = [];
-        }
+        /* Do NOT clear _drawing/_points here.  Since _onDown now returns early for
+           all touch-type pointers, _drawing=true can only be from a pen or mouse.
+           Clearing it here would silently discard an in-progress pen stroke whenever
+           the palm touches the screen mid-stroke.  The pen's own pointerup will
+           commit the stroke normally. */
 
         const rect = this.canvasArea.getBoundingClientRect();
         const t0 = e.touches[0], t1 = e.touches[1];
@@ -634,6 +691,8 @@ export class CanvasEngine {
         const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
         if (this._penNearby && _DRAW_TOOLS.includes(this.tool)) return;
 
+        /* Confirmed finger pan — take ownership of this touch to prevent scroll */
+        e.preventDefault();
         this._stopInertia();
         const t = e.touches[0];
         _tg = {
@@ -820,29 +879,37 @@ export class CanvasEngine {
 
   _onDown(e) {
     e.preventDefault();
+    console.log('[NoteNeo] _onDown type:', e.pointerType, 'id:', e.pointerId, 'pressure:', e.pressure, 'twoFingerActive:', this._twoFingerActive, 'penNearby:', this._penNearby, 'palmRej:', this._palmRejection, 'tool:', this.tool, 'w:', e.width?.toFixed(1), 'h:', e.height?.toFixed(1));
     /* Touch panning/zoom is handled entirely by the unified touch event system
        (touchstart/touchmove/touchend on canvasArea).  Pointer events must NEVER
        start a pan for touch input. */
-    if (this._twoFingerActive) return;
+    if (this._twoFingerActive) { console.log('[NoteNeo] _onDown BLOCKED: twoFingerActive'); return; }
     /* Stop any ongoing inertia scroll when a new gesture starts */
     this._stopInertia();
 
     /* Safety: if a previous stroke was never properly ended (missed pointerup),
        clear the stale live-preview so it doesn’t linger into the next stroke. */
     if (this._drawing) {
+      console.warn('[NoteNeo] _onDown safety: previous stroke never committed! strokes in memory:', this._strokes.length, 'points lost:', this._points.length);
       this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
       this._drawing = false;
       this._drawingPointerId = null;
       this._points = [];
     }
     /* Touch input: panning is handled by touch events. Only allow touch-pointer
-       through for drawing when pen nearby + draw tool + no palm rejection. */
+       through for drawing when pen nearby + draw tool + no palm rejection.
+       EXCEPTION: a touch contact with very small area (< 6px) is almost certainly
+       a stylus tip masquerading as touch — let it draw regardless of palm rejection. */
     if (e.pointerType === 'touch') {
       const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
-      if (!this._penNearby) return;
-      if (!_DRAW_TOOLS.includes(this.tool)) return;
-      if (this._palmRejection) return;
-      /* Fall through: finger drawing with palm rejection OFF */
+      const isStylusTip = (e.width != null && e.height != null && e.width < 6 && e.height < 6);
+      if (!isStylusTip) {
+        if (!this._penNearby) { console.log('[NoteNeo] _onDown BLOCKED: touch+penNearby=false'); return; }
+        if (!_DRAW_TOOLS.includes(this.tool)) { console.log('[NoteNeo] _onDown BLOCKED: touch+notDrawTool'); return; }
+        if (this._palmRejection) { console.log('[NoteNeo] _onDown BLOCKED: touch+palmRejection'); return; }
+      } else {
+        console.log('[NoteNeo] _onDown: treating touch as stylus tip (w:', e.width, 'h:', e.height, ')');
+      }
     }
     /* Space + drag = pan */
     if (this._spaceDown) {
@@ -860,6 +927,7 @@ export class CanvasEngine {
 
     this._drawing = true;
     this._drawingPointerId = e.pointerId;   /* track which pointer started this stroke */
+    if (e.pointerType === 'pen') this._penPointerActive = true;
     this._points  = [{ x: pt.x, y: pt.y, p: pressure, t: Date.now() }];
     this._lastX   = pt.x; this._lastY = pt.y;
 
@@ -908,8 +976,9 @@ export class CanvasEngine {
 
   _onMove(e) {
     e.preventDefault();
-    /* Ignore pointer-move events during an active 2-finger gesture */
-    if (this._twoFingerActive) return;
+    /* Only block TOUCH pointer-moves during an active 2-finger gesture.
+       Pen/mouse strokes must continue uninterrupted even if a palm is on screen. */
+    if (this._twoFingerActive && e.pointerType === 'touch') return;
     const pt = this._screenToPage(e.clientX, e.clientY);
     this.onStatusUpdate({ coords: `${Math.round(pt.x)}, ${Math.round(pt.y)}` });
 
@@ -986,18 +1055,30 @@ export class CanvasEngine {
 
   _onCancel(e) {
     /* Browser cancelled the pointer (system gesture, screenshot, palm, etc.).
-       Discard whatever was in progress without saving.
        Only act if we were actually drawing this pointer (or drawing state is unknown). */
     if (this._drawingPointerId != null && e && e.pointerId !== this._drawingPointerId) return;
-    if (!this._drawing) return;   /* no active stroke to cancel — don’t touch aCtx */
+    if (!this._drawing) return;
+    console.warn('[NoteNeo] pointercancel fired - pointerId:', e?.pointerId, 'type:', e?.pointerType, 'points:', this._points.length);
+    /* For drawing tools with enough points, commit the stroke rather than silently
+       discarding it. On some iPads/Android tablets the browser fires pointercancel
+       instead of pointerup for stylus input, which would cause every stroke to be
+       lost.  Calling _onUp(null) runs the normal commit path (null = no event obj). */
+    const _COMMIT_TOOLS = ['pen', 'marker', 'highlighter', 'line', 'rect', 'circle', 'arrow'];
+    if (_COMMIT_TOOLS.includes(this.tool) && this._points.length >= 1) {
+      console.warn('[NoteNeo] committing stroke via cancel-rescue path');
+      this._onUp(null);
+      return;
+    }
+    /* For eraser/lasso/select or too-short strokes, discard cleanly */
     this._drawing          = false;
     this._drawingPointerId = null;
+    this._penPointerActive = false;
     this._points           = [];
     this._panning          = false;
     this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
   }
-
   _onUp(e) {
+    console.log('[NoteNeo] _onUp type:', e?.pointerType, 'id:', e?.pointerId, 'drawing:', this._drawing, 'panning:', this._panning, 'points:', this._points.length);
     if (this._panning) {
       this._panning = false;
       /* Start inertia if the last move was recent and velocity is significant */
@@ -1009,28 +1090,34 @@ export class CanvasEngine {
     }
     if (!this._drawing) return;
     /* Ignore lift events from a different pointer than the one that started drawing */
-    if (e && this._drawingPointerId != null && e.pointerId !== this._drawingPointerId) return;
+    if (e && this._drawingPointerId != null && e.pointerId !== this._drawingPointerId) {
+      console.log('[NoteNeo] _onUp EARLY RETURN: pointerId mismatch e:', e.pointerId, 'drawing:', this._drawingPointerId);
+      return;
+    }
     this._drawing = false;
     this._drawingPointerId = null;
+    this._penPointerActive = false;
     if (e) e.preventDefault();
     clearTimeout(this._lineSnapTimer);
     this._lineSnapActive = false;
 
     const layer = this.layers[this.activeLayerIdx];
     if (!layer) {
-      /* No active layer — clear any live preview so it doesn't linger into the next stroke. */
+      console.warn('[NoteNeo] _onUp EARLY RETURN: no layer! layers.length:', this.layers.length, 'activeLayerIdx:', this.activeLayerIdx);
       this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
       return;
     }
+    console.log('[NoteNeo] _onUp layer ok:', layer.id, 'pts:', this._points.length);
 
     const pts = this._points;
     if (pts.length < 2) {
+      console.log('[NoteNeo] _onUp EARLY RETURN: pts.length < 2 =', pts.length);
       this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
       /* Single tap → place a dot for drawing tools */
       if (pts.length === 1 && ['pen', 'marker', 'highlighter'].includes(this.tool)) {
         const p = pts[0];
         const dotStroke = {
-          id: crypto.randomUUID(), layerId: layer.id, pageId: this.pageId,
+          id: this._uuid(), layerId: layer.id, pageId: this.pageId,
           tool: this.tool, color: this.color, width: this.width,
           opacity: this.opacity, blendMode: 'source-over',
           points: [p, { ...p, x: p.x + 0.1, y: p.y + 0.1 }],
@@ -1047,11 +1134,13 @@ export class CanvasEngine {
 
     /* Commit stroke */
     if (this.tool === 'eraser') {
+      console.log('[NoteNeo] _onUp EARLY RETURN: eraser');
       /* Already handled in _onMove */
       this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
       return;
     }
     if (this.tool === 'lasso') {
+      console.log('[NoteNeo] _onUp: lasso finish');
       if (this._moveStart || this._selection?._dragMode) {
         /* Was interacting with an existing selection — use select finish logic */
         this._finishSelect(pts);
@@ -1071,34 +1160,40 @@ export class CanvasEngine {
       finalPoints = [this._shapeStart, pts[pts.length - 1]];
     }
 
-    const bbox = this._computeBbox(finalPoints);
-    const stroke = {
-      id: crypto.randomUUID(),
-      layerId: layer.id,
-      pageId: this.pageId,
-      tool: this.tool,
-      color: this.color,
-      width: this.width,
-      opacity: this.opacity,
-      blendMode: this.tool === 'highlighter' ? 'multiply' : 'source-over',
-      points: finalPoints,
-      bbox,
-      extra,
-    };
+    try {
+      const bbox = this._computeBbox(finalPoints);
+      const stroke = {
+        id: this._uuid(),
+        layerId: layer.id,
+        pageId: this.pageId,
+        tool: this.tool,
+        color: this.color,
+        width: this.width,
+        opacity: this.opacity,
+        blendMode: this.tool === 'highlighter' ? 'multiply' : 'source-over',
+        points: finalPoints,
+        bbox,
+        extra,
+      };
 
-    /* Bake onto layer canvas */
-    this._strokes.push(stroke);
-    this._renderLayer(layer);
+      /* Bake onto layer canvas */
+      console.log('[NoteNeo] committing stroke. strokes before:', this._strokes.length, '| layer:', layer.id, '| layerId:', stroke.layerId);
+      this._strokes.push(stroke);
+      console.log('[NoteNeo] strokes after push:', this._strokes.length);
+      this._renderLayer(layer);
 
-    /* Clear active canvas */
-    this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
-    this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
+      /* Clear active canvas */
+      this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
+      this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
 
-    /* Undo entry */
-    this._pushUndo({ type: 'add', strokes: [stroke] });
+      /* Undo entry */
+      this._pushUndo({ type: 'add', strokes: [stroke] });
 
-    /* Schedule save */
-    this._scheduleSave([stroke]);
+      /* Schedule save */
+      this._scheduleSave([stroke]);
+    } catch (err) {
+      console.warn('[NoteNeo] EXCEPTION during stroke commit:', err?.message, err?.stack);
+    }
   }
 
   _livePreview(pt) {
@@ -1287,7 +1382,7 @@ export class CanvasEngine {
     const maxLen   = Math.max(...lines.map(l => l.length));
     const textBbox = { x, y, w: Math.max(20, maxLen * fontSize * 0.62), h: lines.length * fontSize * 1.4 };
     const stroke = {
-      id: crypto.randomUUID(), layerId: layer.id, pageId: this.pageId,
+      id: this._uuid(), layerId: layer.id, pageId: this.pageId,
       tool: 'text', color: this.color, width: this.width,
       opacity: this.opacity, blendMode: 'source-over',
       points: [{ x, y, p: 1, t: Date.now() }],
@@ -1864,12 +1959,12 @@ export class CanvasEngine {
       ? { strokes: this._copyBuffer, images: [] }
       : this._copyBuffer;
     const newStrokes = buf.strokes.map(s => ({
-      ...s, id: crypto.randomUUID(), layerId: layer.id,
+      ...s, id: this._uuid(), layerId: layer.id,
       points: s.points.map(p => ({ ...p, x: p.x + 14, y: p.y + 14 })),
       bbox: s.bbox ? { ...s.bbox, x: s.bbox.x + 14, y: s.bbox.y + 14 } : null,
     }));
     const newImages = buf.images.map(img => ({
-      ...img, id: crypto.randomUUID(), layerId: layer.id, _el: null,
+      ...img, id: this._uuid(), layerId: layer.id, _el: null,
       x: img.x + 14, y: img.y + 14,
     }));
     this._strokes.push(...newStrokes);
@@ -1983,7 +2078,7 @@ export class CanvasEngine {
   async insertImage(dataUrl) {
     const layer = this.layers[this.activeLayerIdx];
     const img = {
-      id: crypto.randomUUID(),
+      id: this._uuid(),
       layerId: layer.id,
       data: dataUrl,
       x: (this.pageW - 300) / 2,

@@ -359,6 +359,9 @@ async function openPageEditor(pageId) {
     bindCanvasEngineToolbar();
     /* Expose for automated tests (harmless in production) */
     window._canvasEngine = engine;
+    /* Debug log button */
+    const btnLog = document.getElementById('btn-copy-debug-log');
+    if (btnLog) btnLog.addEventListener('click', () => engine.copyDebugLog());
   }
 
   await loadPageIntoEditor(editorPageIdx);
