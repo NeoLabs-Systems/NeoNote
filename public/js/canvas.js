@@ -103,6 +103,16 @@ export class CanvasEngine {
     this._penNearby      = false;
     this._penNearbyTimer = null;
 
+    /* Pan inertia */
+    this._panVelX  = 0;
+    this._panVelY  = 0;
+    this._panRafId = null;
+    this._panLastT = 0;
+
+    /* Selection toolbar element */
+    this._selectToolbar = document.getElementById('select-toolbar');
+    this._selectionBbox = null;
+
     this._bindEvents();
   }
 
@@ -488,6 +498,11 @@ export class CanvasEngine {
   _applyTransform() {
     this.viewport.style.transform = `translate(${this.offsetX}px, ${this.offsetY}px) scale(${this.scale})`;
     document.getElementById('zoom-display').textContent = Math.round(this.scale * 100) + '%';
+    /* Reposition selection toolbar if selection is active */
+    if (this._selectionBbox && this._selectToolbar?.style.display !== 'none') {
+      const { bx, by, bw, bh } = this._selectionBbox;
+      this._showSelectToolbar(bx, by, bw, bh);
+    }
   }
 
   setZoom(scale, clientX, clientY) {
@@ -557,11 +572,15 @@ export class CanvasEngine {
     /* Context menu prevent */
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    /* Touch pan (2-finger) */
+    /* Touch pan (2-finger) + pinch zoom */
     let _lastTouches = null;
     this.canvasArea.addEventListener('touchstart', e => {
       if (e.touches.length === 2) {
-        _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY }));
+        _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY, t: Date.now() }));
+        /* Stop any active 1-finger pointer pan so it doesn't fight the 2-finger gesture */
+        this._panning = false;
+        this._stopInertia();
+        this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
         e.preventDefault();
       }
     }, { passive: false });
@@ -569,23 +588,40 @@ export class CanvasEngine {
       if (e.touches.length === 2 && _lastTouches) {
         e.preventDefault();
         const t = e.touches;
-        /* Pan */
-        const dx = ((t[0].clientX + t[1].clientX) / 2) - ((_lastTouches[0].clientX + _lastTouches[1].clientX) / 2);
-        const dy = ((t[0].clientY + t[1].clientY) / 2) - ((_lastTouches[0].clientY + _lastTouches[1].clientY) / 2);
+        const now = Date.now();
+        /* Pan: move based on midpoint delta */
+        const mx1 = (t[0].clientX + t[1].clientX) / 2;
+        const my1 = (t[0].clientY + t[1].clientY) / 2;
+        const mx0 = (_lastTouches[0].clientX + _lastTouches[1].clientX) / 2;
+        const my0 = (_lastTouches[0].clientY + _lastTouches[1].clientY) / 2;
+        const dx = mx1 - mx0, dy = my1 - my0;
         this.offsetX += dx; this.offsetY += dy;
-        /* Pinch zoom */
+        /* Track velocity for inertia (pixels/ms) */
+        const dt = Math.max(1, now - _lastTouches[0].t);
+        this._panVelX = dx / dt;
+        this._panVelY = dy / dt;
+        this._panLastT = now;
+        /* Pinch zoom — zoom around midpoint of current touches */
         const d1 = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
         const d0 = Math.hypot(_lastTouches[0].clientX - _lastTouches[1].clientX, _lastTouches[0].clientY - _lastTouches[1].clientY);
         if (d0 > 1) {
-          const mx = (t[0].clientX + t[1].clientX) / 2;
-          const my = (t[0].clientY + t[1].clientY) / 2;
-          this.setZoom(this.scale * d1 / d0, mx, my);
+          this.setZoom(this.scale * d1 / d0, mx1, my1);
+        } else {
+          this._applyTransform();
         }
-        _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY }));
-        this._applyTransform();
+        _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY, t: now }));
       }
     }, { passive: false });
-    this.canvasArea.addEventListener('touchend', () => { _lastTouches = null; }, { passive: false });
+    this.canvasArea.addEventListener('touchend', () => {
+      if (_lastTouches) {
+        const dt = Date.now() - this._panLastT;
+        /* Start inertia only if the last move was recent (< 100 ms) */
+        if (dt < 100 && (Math.abs(this._panVelX) > 0.05 || Math.abs(this._panVelY) > 0.05)) {
+          this._startInertia(this._panVelX, this._panVelY);
+        }
+        _lastTouches = null;
+      }
+    }, { passive: false });
 
     /* Space key release */
     document.addEventListener('keyup', e => {
@@ -619,6 +655,14 @@ export class CanvasEngine {
         this._penNearby = false;
       }
     });
+
+    /* Selection toolbar buttons */
+    const stb = this._selectToolbar;
+    if (stb) {
+      stb.querySelector('#sel-tb-copy')?.addEventListener('click', e => { e.stopPropagation(); this._copySelection(); });
+      stb.querySelector('#sel-tb-duplicate')?.addEventListener('click', e => { e.stopPropagation(); this._duplicateSelection(); });
+      stb.querySelector('#sel-tb-delete')?.addEventListener('click', e => { e.stopPropagation(); this._deleteSelection(); });
+    }
   }
 
   _onDblClick(e) {
@@ -640,6 +684,7 @@ export class CanvasEngine {
     const layer = this.layers.find(l => l.id === textStroke.layerId);
     if (layer) this._renderLayer(layer);
     this._selection = null;
+    this._hideSelectToolbar();
     this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
     this.color = textStroke.color;
     this.width = textStroke.width;
@@ -659,6 +704,8 @@ export class CanvasEngine {
 
   _onDown(e) {
     e.preventDefault();
+    /* Stop any ongoing inertia scroll when a new gesture starts */
+    this._stopInertia();
 
     /* Safety: if a previous stroke was never properly ended (missed pointerup),
        clear the stale live-preview so it doesn’t linger into the next stroke. */
@@ -673,6 +720,7 @@ export class CanvasEngine {
     if (e.pointerType === 'touch' && e.isPrimary && !this._penNearby) {
       this._panning = true;
       this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
+      this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
       return;
     }
     /* Single-finger touch pan when no drawing tool is active (pen IS nearby) */
@@ -680,6 +728,7 @@ export class CanvasEngine {
     if (e.pointerType === 'touch' && e.isPrimary && !_DRAW_TOOLS.includes(this.tool)) {
       this._panning = true;
       this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
+      this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
       return;
     }
     /* Palm rejection for drawing tools when touch input */
@@ -687,6 +736,7 @@ export class CanvasEngine {
     /* Space + drag = pan */
     if (this._spaceDown) {
       this._panning = true; this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
+      this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
       return;
     }
 
@@ -781,8 +831,15 @@ export class CanvasEngine {
 
     /* Pan mode */
     if (this._panning && this._panStart) {
-      this.offsetX = this._panStart.ox + (e.clientX - this._panStart.x);
-      this.offsetY = this._panStart.oy + (e.clientY - this._panStart.y);
+      const now = Date.now();
+      const dt = Math.max(1, now - this._panLastT);
+      const newX = this._panStart.ox + (e.clientX - this._panStart.x);
+      const newY = this._panStart.oy + (e.clientY - this._panStart.y);
+      this._panVelX = (newX - this.offsetX) / dt;
+      this._panVelY = (newY - this.offsetY) / dt;
+      this._panLastT = now;
+      this.offsetX = newX;
+      this.offsetY = newY;
       this._applyTransform(); return;
     }
     if (!this._drawing) return;
@@ -828,7 +885,15 @@ export class CanvasEngine {
   }
 
   _onUp(e) {
-    if (this._panning) { this._panning = false; return; }
+    if (this._panning) {
+      this._panning = false;
+      /* Start inertia if the last move was recent and velocity is significant */
+      const dt = Date.now() - this._panLastT;
+      if (dt < 100 && (Math.abs(this._panVelX) > 0.05 || Math.abs(this._panVelY) > 0.05)) {
+        this._startInertia(this._panVelX, this._panVelY);
+      }
+      return;
+    }
     if (!this._drawing) return;
     /* Ignore lift events from a different pointer than the one that started drawing */
     if (e && this._drawingPointerId != null && e.pointerId !== this._drawingPointerId) return;
@@ -1245,6 +1310,7 @@ export class CanvasEngine {
       return;
     }
     this._selection = null;
+    this._hideSelectToolbar();
     this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
   }
 
@@ -1282,7 +1348,7 @@ export class CanvasEngine {
     const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
     const rx = Math.min(...xs), ry = Math.min(...ys);
     const rw = Math.max(...xs) - rx, rh = Math.max(...ys) - ry;
-    if (rw < 4 && rh < 4) { this._selection = null; return; }
+    if (rw < 4 && rh < 4) { this._selection = null; this._hideSelectToolbar(); return; }
     const insideStrokes = this._strokes.filter(s => {
       if (!s.bbox) return false;
       return s.bbox.x >= rx && s.bbox.y >= ry && s.bbox.x + s.bbox.w <= rx + rw && s.bbox.y + s.bbox.h <= ry + rh;
@@ -1295,6 +1361,7 @@ export class CanvasEngine {
       this._drawSelectOverlay();
     } else {
       this._selection = null;
+      this._hideSelectToolbar();
     }
   }
 
@@ -1312,6 +1379,8 @@ export class CanvasEngine {
     const pad = 10;
     const bx = bbox.x - pad, by = bbox.y - pad;
     const bw = bbox.w + pad * 2, bh = bbox.h + pad * 2;
+    /* Store bbox for toolbar repositioning during pan/zoom */
+    this._selectionBbox = { bx, by, bw, bh };
     const lw = 1.5 / this.scale;
     const hr = 6  / this.scale;   /* handle circle radius */
 
@@ -1367,6 +1436,39 @@ export class CanvasEngine {
     });
 
     ctx.restore();
+
+    /* Show floating selection toolbar above the selection */
+    this._showSelectToolbar(bx, by, bw, bh);
+  }
+
+  _showSelectToolbar(bx, by, bw, bh) {
+    const tb = this._selectToolbar;
+    if (!tb) return;
+    const area = this.canvasArea;
+    /* Convert canvas coordinates to canvas-area CSS coordinates */
+    const screenX = bx * this.scale + this.offsetX;
+    const screenY = by * this.scale + this.offsetY;
+    const screenW = bw * this.scale;
+    const screenH = bh * this.scale;
+    const tbH = tb.offsetHeight || 40;
+    const tbW = tb.offsetWidth  || 180;
+    const GAP = 8;
+    let top = screenY - tbH - GAP;
+    /* If toolbar would go above the visible area, show it below selection instead */
+    if (top < 4) top = screenY + screenH + GAP;
+    /* Clamp to area bounds */
+    top = Math.max(4, Math.min(top, area.clientHeight - tbH - 4));
+    /* Center the toolbar horizontally over the selection */
+    let left = screenX + screenW / 2 - tbW / 2;
+    left = Math.max(4, Math.min(left, area.clientWidth - tbW - 4));
+    tb.style.top  = top  + 'px';
+    tb.style.left = left + 'px';
+    tb.style.display = 'flex';
+  }
+
+  _hideSelectToolbar() {
+    if (this._selectToolbar) this._selectToolbar.style.display = 'none';
+    this._selectionBbox = null;
   }
 
   _moveSelection(dx, dy) {
@@ -1540,6 +1642,7 @@ export class CanvasEngine {
      ═══════════════════════════════════════════════════════════ */
   _onWheel(e) {
     e.preventDefault();
+    this._stopInertia();
     if (e.ctrlKey || e.metaKey) {
       /* Trackpad pinch or Ctrl+scroll — proportional, smooth zoom */
       const factor = Math.pow(1.002, -e.deltaY);
@@ -1550,6 +1653,39 @@ export class CanvasEngine {
       this.offsetX -= e.deltaX * speed;
       this.offsetY -= e.deltaY * speed;
       this._applyTransform();
+    }
+  }
+
+  /* ═══════════════════════════════════════════════════════════
+     PAN INERTIA
+     ═══════════════════════════════════════════════════════════ */
+  _startInertia(vx, vy) {
+    this._stopInertia();
+    /* Convert velocity from px/ms to px/frame (assumes ~60 fps → 16.67 ms/frame) */
+    const MS_PER_FRAME = 16;
+    let velX = vx * MS_PER_FRAME;
+    let velY = vy * MS_PER_FRAME;
+    const FRICTION = 0.92;
+    const MIN_VEL  = 0.3;
+    const step = () => {
+      velX *= FRICTION;
+      velY *= FRICTION;
+      if (Math.abs(velX) < MIN_VEL && Math.abs(velY) < MIN_VEL) {
+        this._panRafId = null;
+        return;
+      }
+      this.offsetX += velX;
+      this.offsetY += velY;
+      this._applyTransform();
+      this._panRafId = requestAnimationFrame(step);
+    };
+    this._panRafId = requestAnimationFrame(step);
+  }
+
+  _stopInertia() {
+    if (this._panRafId != null) {
+      cancelAnimationFrame(this._panRafId);
+      this._panRafId = null;
     }
   }
 
@@ -1594,6 +1730,7 @@ export class CanvasEngine {
       });
     }
     this._selection = null;
+    this._hideSelectToolbar();
     this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
     this._renderAll();
   }
@@ -1653,6 +1790,7 @@ export class CanvasEngine {
     this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
     if (tool !== 'select' && tool !== 'lasso') {
       this._selection = null;
+      this._hideSelectToolbar();
     }
     /* Re-draw selection overlay if switching to select/lasso while selection exists */
     if ((tool === 'select' || tool === 'lasso') && this._selection) {
