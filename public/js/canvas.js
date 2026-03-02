@@ -713,7 +713,26 @@ export class CanvasEngine {
     this._applyTransform();
   }
 
+  /* Clamp offsetX/offsetY so at least MARGIN px of the page stack stays on-screen. */
+  _clampOffset() {
+    const area     = this.canvasArea;
+    const aw       = area.clientWidth;
+    const ah       = area.clientHeight;
+    /* Use the pagesContainer's intrinsic size (set by loadAllPages) to know total content extent. */
+    const contentW = (this.pagesContainer.offsetWidth  || this.pageW) * this.scale;
+    const contentH = (this.pagesContainer.offsetHeight || this.pageH) * this.scale;
+    /* How much of the content must stay visible on each side */
+    const MARGIN = 120;
+    /* X: right edge of content must be >= MARGIN from left edge of area,
+          left edge of content must be <= aw - MARGIN from left edge of area */
+    this.offsetX = Math.max(MARGIN - contentW, Math.min(aw - MARGIN, this.offsetX));
+    /* Y: bottom edge of content must be >= MARGIN from top of area,
+          top edge of content must be <= ah - MARGIN from top of area */
+    this.offsetY = Math.max(MARGIN - contentH, Math.min(ah - MARGIN, this.offsetY));
+  }
+
   _applyTransform() {
+    this._clampOffset();
     this.viewport.style.transform = `translate(${this.offsetX}px, ${this.offsetY}px) scale(${this.scale})`;
     document.getElementById('zoom-display').textContent = Math.round(this.scale * 100) + '%';
     /* Reposition selection toolbar if selection is active */

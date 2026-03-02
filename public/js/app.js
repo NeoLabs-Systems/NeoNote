@@ -1239,37 +1239,58 @@ function shiftHue(hex, deg) {
 async function importPDF(file) {
   if (!window.pdfjsLib) { showToast('PDF library not ready yet, try again'); return; }
   if (!editorNotebookId)  { showToast('Open a notebook first'); return; }
+
+  let pdf;
   try {
     showToast('Reading PDF…');
-    const ab  = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: ab }).promise;
-    const total = pdf.numPages;
-    const firstNewIdx = editorPages.length; /* track where new pages start */
+    const ab = await file.arrayBuffer();
+    /* Pass Uint8Array — more reliable across PDF.js versions than raw ArrayBuffer */
+    pdf = await pdfjsLib.getDocument({ data: new Uint8Array(ab) }).promise;
+  } catch (err) {
+    console.error('[NeoNote] PDF load error', err);
+    showToast('Could not read PDF: ' + (err.message || err));
+    return;
+  }
 
-    for (let i = 1; i <= total; i++) {
-      showToast(`Rendering PDF page ${i} / ${total}…`);
+  const total       = pdf.numPages;
+  const firstNewIdx = editorPages.length;
+  let   imported    = 0;
+
+  for (let i = 1; i <= total; i++) {
+    showToast(`Rendering page ${i} / ${total}…`);
+    try {
       const pdfPage  = await pdf.getPage(i);
       const viewport = pdfPage.getViewport({ scale: 1.0 });
+
+      /* Scale to fill as much of 1404×1872 as possible while keeping aspect ratio */
       const scale    = Math.min(1404 / viewport.width, 1872 / viewport.height);
       const scaledVp = pdfPage.getViewport({ scale });
 
-      const offscreen = document.createElement('canvas');
-      offscreen.width = 1404; offscreen.height = 1872;
-      const ctx = offscreen.getContext('2d');
+      /* Render to a temp canvas that exactly matches the scaled PDF dimensions.
+         This avoids the PDF-coordinate-space transform ambiguity: instead of
+         passing a transform to render(), we use ctx.drawImage() to composite
+         the result onto the final 1404×1872 white canvas at the right position. */
+      const tmp    = document.createElement('canvas');
+      tmp.width    = Math.ceil(scaledVp.width);
+      tmp.height   = Math.ceil(scaledVp.height);
+      await pdfPage.render({ canvasContext: tmp.getContext('2d'), viewport: scaledVp }).promise;
+
+      /* Composite onto a 1404×1872 white canvas, centred */
+      const out  = document.createElement('canvas');
+      out.width  = 1404; out.height = 1872;
+      const ctx  = out.getContext('2d');
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, 1404, 1872);
-      const offX = Math.round((1404 - scaledVp.width)  / 2);
-      const offY = Math.round((1872 - scaledVp.height) / 2);
-      await pdfPage.render({
-        canvasContext: ctx, viewport: scaledVp, transform: [1, 0, 0, 1, offX, offY],
-      }).promise;
-      const dataUrl = offscreen.toDataURL('image/jpeg', 0.88);
+      ctx.drawImage(tmp, Math.round((1404 - tmp.width) / 2), Math.round((1872 - tmp.height) / 2));
 
-      /* Always create a new page for every PDF page */
-      const afterId  = editorPages[editorPages.length - 1]?.id;
-      const newPage  = await POST('/pages', { notebookId: editorNotebookId, afterPageId: afterId });
+      const dataUrl = out.toDataURL('image/jpeg', 0.90);
+
+      /* Create server page, attach the rasterised image, save thumbnail */
+      const newPage = await POST('/pages', {
+        notebookId: editorNotebookId,
+        afterPageId: editorPages[editorPages.length - 1]?.id,
+      });
       editorPages.push(newPage);
-      /* page-indicator removed from UI: no update needed here */
 
       const layers  = await GET('/pages/' + newPage.id + '/layers');
       const layerId = layers[0]?.id;
@@ -1280,18 +1301,27 @@ async function importPDF(file) {
         });
         const th = document.createElement('canvas');
         th.width = 350; th.height = Math.round(350 * 1872 / 1404);
-        th.getContext('2d').drawImage(offscreen, 0, 0, th.width, th.height);
+        th.getContext('2d').drawImage(out, 0, 0, th.width, th.height);
         await PATCH('/pages/' + newPage.id, { thumbnail: th.toDataURL('image/jpeg', 0.5) });
       }
+      imported++;
+    } catch (pageErr) {
+      console.error('[NeoNote] PDF page', i, 'render error:', pageErr);
+      showToast(`Warning: page ${i} failed — skipped`);
+      /* continue with remaining pages */
     }
-    /* Navigate to the first newly imported page */
-    await loadAllPagesIntoEditor();
-    engine.scrollToPage(firstNewIdx);
-    showToast(`PDF imported — ${total} page${total > 1 ? 's' : ''} added`);
-  } catch (err) {
-    console.error('[NeoNote] PDF import error', err);
-    showToast('PDF import failed: ' + (err.message || err));
   }
+
+  try { pdf.destroy(); } catch { /* best-effort cleanup */ }
+
+  if (imported === 0) {
+    showToast('PDF import failed — no pages could be rendered');
+    return;
+  }
+
+  await loadAllPagesIntoEditor();
+  engine.scrollToPage(firstNewIdx);
+  showToast(`PDF imported — ${imported} of ${total} page${total > 1 ? 's' : ''} added`);
 }
 
 /* ══════════════════════════════════════════════════════════════
