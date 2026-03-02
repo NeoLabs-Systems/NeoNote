@@ -14,9 +14,11 @@
 
 export class CanvasEngine {
   constructor(opts = {}) {
-    // For straight line detection
-    this._lineSnapTimer = null;
+    // Shape snap (line / circle / rect / polyline / rectilinear)
+    this._lineSnapTimer  = null;
     this._lineSnapActive = false;
+    this._snapType       = null;   // 'line'|'circle'|'rect'|'polyline'|'rectilinear'
+    this._snapPoints     = null;   // geometry computed at snap time
     this.onSave       = opts.onSave       || (() => {});
     this.onStatusUpdate = opts.onStatusUpdate || (() => {});
     this.onUndoRedoUpdate = opts.onUndoRedoUpdate || (() => {});
@@ -1100,16 +1102,20 @@ export class CanvasEngine {
     this._points  = [{ x: pt.x, y: pt.y, p: pressure, t: Date.now() }];
     this._lastX   = pt.x; this._lastY = pt.y;
 
-    // Start straight line detection timer for pen tool
+    // Shape snap detection timer (line / circle / rect / polyline / rectilinear)
     if (this.tool === 'pen') {
       this._lineSnapActive = false;
+      this._snapType       = null;
+      this._snapPoints     = null;
       clearTimeout(this._lineSnapTimer);
-      this._lineSnapTimer = setTimeout(() => {
-        if (this._points.length > 8 && this._isAlmostStraightLine(this._points)) {
+      this._lineSnapTimer  = setTimeout(() => {
+        const snap = this._detectShape(this._points);
+        if (snap) {
+          this._snapType       = snap.type;
+          this._snapPoints     = snap.points;
           this._lineSnapActive = true;
-          // Optionally, show a visual indicator here
         }
-      }, 500); // 0.5s hold
+      }, 1500); // 1.5 s hold — only fires if the user stops moving
     }
 
     if (this.tool === 'text') {
@@ -1209,11 +1215,33 @@ export class CanvasEngine {
       this._points.push({ x: cp.x, y: cp.y, p: (ce.pressure > 0 && this.pressureEnabled) ? ce.pressure : pressure, t: Date.now() });
     }
 
-    // If line snap is active, replace points with endpoints
-    if (this.tool === 'pen' && this._lineSnapActive && this._points.length > 2) {
-      const first = this._points[0];
-      const last = this._points[this._points.length - 1];
-      this._points = [first, last];
+    // If snap hasn't fired yet, reset the timer whenever the finger/pen moves
+    // so the timer only completes during a genuine held pause.
+    if (this.tool === 'pen' && !this._lineSnapActive && this._lineSnapTimer != null) {
+      const prev = this._points[this._points.length - 2];
+      const cur  = this._points[this._points.length - 1];
+      if (prev && cur && Math.hypot(cur.x - prev.x, cur.y - prev.y) > 1.5) {
+        clearTimeout(this._lineSnapTimer);
+        this._lineSnapTimer = setTimeout(() => {
+          const snap = this._detectShape(this._points);
+          if (snap) {
+            this._snapType       = snap.type;
+            this._snapPoints     = snap.points;
+            this._lineSnapActive = true;
+          }
+        }, 1500);
+      }
+    }
+
+    // Shape snap: for line type, keep first point fixed and update endpoint;
+    // for closed shapes (circle/rect) and polylines, geometry is frozen at snap time.
+    if (this.tool === 'pen' && this._lineSnapActive) {
+      if (this._snapType === 'line') {
+        const cur = this._points[this._points.length - 1];
+        this._points    = [this._snapPoints[0], cur];
+        this._snapPoints = [this._snapPoints[0], cur];
+      }
+      // circle / rect / polyline / rectilinear: snapPoints stay frozen
     }
 
     this._lastX = pt.x; this._lastY = pt.y;
@@ -1244,6 +1272,10 @@ export class CanvasEngine {
     this._penPointerActive = false;
     this._points           = [];
     this._panning          = false;
+    clearTimeout(this._lineSnapTimer);
+    this._lineSnapActive = false;
+    this._snapType       = null;
+    this._snapPoints     = null;
     this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
   }
   _onUp(e) {
@@ -1269,6 +1301,10 @@ export class CanvasEngine {
     if (e) e.preventDefault();
     clearTimeout(this._lineSnapTimer);
     this._lineSnapActive = false;
+    const _snapType   = this._snapType;
+    const _snapPoints = this._snapPoints;
+    this._snapType    = null;
+    this._snapPoints  = null;
 
     const layer = this.layers[this.activeLayerIdx];
     if (!layer) {
@@ -1324,6 +1360,34 @@ export class CanvasEngine {
 
     let finalPoints = pts;
     let extra = null;
+
+    /* Shape-snap: circle / rect committed as shape-tool strokes; polyline uses snapped corners */
+    if (this.tool === 'pen' && _snapType) {
+      if (_snapType === 'circle' || _snapType === 'rect') {
+        const [p0, p1] = _snapPoints;
+        try {
+          const stroke = {
+            id: this._uuid(), layerId: layer.id, pageId: this.pageId,
+            tool: _snapType, color: this.color, width: this.width,
+            opacity: this.opacity, blendMode: 'source-over',
+            points: [p0, p1], bbox: this._computeBbox([p0, p1]), extra: null,
+          };
+          this._strokes.push(stroke);
+          this._renderLayer(layer);
+          this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
+          this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
+          this._pushUndo({ type: 'add', strokes: [stroke] });
+          this._scheduleSave([stroke]);
+        } catch (err) {
+          console.warn('[NoteNeo] shape-snap commit error:', err);
+        }
+        return;
+      }
+      if (_snapType === 'polyline' || _snapType === 'rectilinear') {
+        finalPoints = _snapPoints;
+      }
+      // 'line': finalPoints stays as pts (already collapsed to 2 pts via _onMove)
+    }
 
     if (['line','rect','circle','arrow'].includes(this.tool) && this._shapeStart) {
       finalPoints = [this._shapeStart, pts[pts.length - 1]];
@@ -1448,13 +1512,36 @@ export class CanvasEngine {
     if (this.tool === 'highlighter') {
       ctx.lineWidth = this.width * 8; ctx.lineCap = 'square';
       this._drawSmooth(ctx, pts, this.width * 8);
-    } else if (this.tool === 'pen' && this._lineSnapActive && pts.length === 2) {
-      // Draw a perfect line preview
+    } else if (this.tool === 'pen' && this._lineSnapActive && this._snapType) {
+      // Shape-snap live preview
       ctx.lineWidth = this.width;
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      ctx.lineTo(pts[1].x, pts[1].y);
-      ctx.stroke();
+      switch (this._snapType) {
+        case 'line':
+          ctx.beginPath();
+          ctx.moveTo(pts[0].x, pts[0].y);
+          ctx.lineTo(pts[1].x, pts[1].y);
+          ctx.stroke();
+          break;
+        case 'circle':
+        case 'rect': {
+          const [p0, p1] = this._snapPoints;
+          this._renderShape(ctx, {
+            tool: this._snapType, color: this.color, width: this.width,
+            opacity: this.opacity, blendMode: 'source-over',
+            extra: {}, points: [p0, p1],
+          });
+          break;
+        }
+        case 'polyline':
+        case 'rectilinear': {
+          const sp = this._snapPoints;
+          ctx.beginPath();
+          ctx.moveTo(sp[0].x, sp[0].y);
+          for (let i = 1; i < sp.length; i++) ctx.lineTo(sp[i].x, sp[i].y);
+          ctx.stroke();
+          break;
+        }
+      }
     } else {
       this._drawPressurePath(ctx, pts, this.width);
     }
@@ -1477,6 +1564,174 @@ export class CanvasEngine {
       if (dist > maxDist) maxDist = dist;
     }
     return maxDist < 8; // threshold in px
+  }
+
+  /* ─── Shape detection helpers ─────────────────────────────────────────── */
+
+  /**
+   * Master detector: tries to recognise the drawn path as a geometric shape.
+   * Returns { type, points } or null.
+   *   type: 'line' | 'circle' | 'rect' | 'rectilinear' | 'polyline'
+   *   points: the idealised geometry (2-pt for line/circle/rect, N-pt for poly)
+   */
+  _detectShape(pts) {
+    if (pts.length < 8) return null;
+
+    // 1. Closed circle / ellipse
+    if (this._isAlmostCircle(pts)) {
+      return { type: 'circle', points: this._snapToCirclePoints(pts) };
+    }
+
+    // 2. Closed rectangle / quadrilateral
+    if (this._isAlmostRect(pts)) {
+      return { type: 'rect', points: this._snapToRectPoints(pts) };
+    }
+
+    // 3. Straight single line
+    if (pts.length > 8 && this._isAlmostStraightLine(pts)) {
+      return { type: 'line', points: [pts[0], pts[pts.length - 1]] };
+    }
+
+    // 4. Rectilinear polyline (graph / schematic path — mostly H/V segments)
+    const corners = this._findCorners(pts, 35);
+    if (corners.length >= 3 && corners.length <= Math.max(4, pts.length * 0.35)) {
+      if (this._isMostlyRectilinear(corners)) {
+        return { type: 'rectilinear', points: this._snapToRectilinear(corners) };
+      }
+      // 5. General multi-segment polyline (arbitrary angles — circuit symbols etc.)
+      return { type: 'polyline', points: corners };
+    }
+
+    return null;
+  }
+
+  /** True if the path starts and ends near each other relative to its size. */
+  _isClosedPath(pts) {
+    if (pts.length < 8) return false;
+    const d     = Math.hypot(pts[pts.length - 1].x - pts[0].x, pts[pts.length - 1].y - pts[0].y);
+    const xs    = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const span  = Math.hypot(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+    return span > 30 && d < span * 0.28;
+  }
+
+  /** True if the path is roughly circular (points equidistant from centroid). */
+  _isAlmostCircle(pts) {
+    if (!this._isClosedPath(pts) || pts.length < 14) return false;
+    const cx    = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const cy    = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const radii = pts.map(p => Math.hypot(p.x - cx, p.y - cy));
+    const r     = radii.reduce((s, v) => s + v, 0) / radii.length;
+    if (r < 20) return false;
+    const maxDev = Math.max(...radii.map(ri => Math.abs(ri - r)));
+    return maxDev / r < 0.22;
+  }
+
+  /** Return the two bounding-box corner points that encode a snapped circle. */
+  _snapToCirclePoints(pts) {
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    const r  = pts.reduce((s, p) => s + Math.hypot(p.x - cx, p.y - cy), 0) / pts.length;
+    const t  = Date.now();
+    return [
+      { x: cx - r, y: cy - r, p: 0.5, t },
+      { x: cx + r, y: cy + r, p: 0.5, t },
+    ];
+  }
+
+  /**
+   * True if the path is closed and contains 3–7 corners (→ likely a rectangle
+   * or other simple polygon).
+   */
+  _isAlmostRect(pts) {
+    if (!this._isClosedPath(pts) || pts.length < 10) return false;
+    const corners = this._findCorners(pts, 55);
+    if (corners.length < 3 || corners.length > 7) return false;
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const w  = Math.max(...xs) - Math.min(...xs);
+    const h  = Math.max(...ys) - Math.min(...ys);
+    return Math.min(w, h) > 20;
+  }
+
+  /** Return the two axis-aligned bounding-box corners for a snapped rectangle. */
+  _snapToRectPoints(pts) {
+    const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+    const t  = Date.now();
+    return [
+      { x: Math.min(...xs), y: Math.min(...ys), p: 0.5, t },
+      { x: Math.max(...xs), y: Math.max(...ys), p: 0.5, t },
+    ];
+  }
+
+  /**
+   * Walk the drawn path and return an array of "corner" points — locations where
+   * the travel direction changes by more than minAngleDeg degrees.
+   * The first and last points of pts are always included.
+   */
+  _findCorners(pts, minAngleDeg = 40) {
+    if (pts.length < 4) return pts.slice();
+    const minAngle = minAngleDeg * Math.PI / 180;
+    const WIN      = Math.max(2, Math.floor(pts.length / 25));
+    const corners  = [pts[0]];
+    let skipUntil  = WIN;
+
+    for (let i = WIN; i < pts.length - WIN; i++) {
+      if (i < skipUntil) continue;
+      const before = pts[i - WIN], cur = pts[i], after = pts[i + WIN];
+      const v1 = { x: cur.x - before.x, y: cur.y - before.y };
+      const v2 = { x: after.x - cur.x,  y: after.y - cur.y  };
+      const l1 = Math.hypot(v1.x, v1.y), l2 = Math.hypot(v2.x, v2.y);
+      if (l1 < 1 || l2 < 1) continue;
+      const cos   = (v1.x * v2.x + v1.y * v2.y) / (l1 * l2);
+      const angle = Math.acos(Math.max(-1, Math.min(1, cos)));
+      if (angle > minAngle) {
+        const last = corners[corners.length - 1];
+        if (Math.hypot(cur.x - last.x, cur.y - last.y) > 15) {
+          corners.push(cur);
+          skipUntil = i + WIN;
+        }
+      }
+    }
+    corners.push(pts[pts.length - 1]);
+    return corners;
+  }
+
+  /**
+   * True if the majority of segments between corners lie within 25° of
+   * horizontal or vertical (i.e. suitable for rectilinear snapping).
+   */
+  _isMostlyRectilinear(corners) {
+    if (corners.length < 2) return false;
+    let count = 0, total = 0;
+    for (let i = 1; i < corners.length; i++) {
+      const dx  = Math.abs(corners[i].x - corners[i - 1].x);
+      const dy  = Math.abs(corners[i].y - corners[i - 1].y);
+      const len = Math.hypot(dx, dy);
+      if (len < 8) continue;
+      total++;
+      const ang = Math.atan2(dy, dx); // 0 = H, π/2 = V
+      if (ang < 0.44 || ang > 1.13) count++; // within 25° of H or V
+    }
+    return total > 0 && count / total > 0.55;
+  }
+
+  /**
+   * Snap a set of corners so each segment becomes perfectly horizontal or
+   * vertical, by choosing whichever axis dominates each segment.
+   */
+  _snapToRectilinear(corners) {
+    if (corners.length < 2) return corners;
+    const t       = Date.now();
+    const snapped = [{ ...corners[0], t }];
+    for (let i = 1; i < corners.length; i++) {
+      const prev = snapped[snapped.length - 1];
+      const cur  = corners[i];
+      if (Math.abs(cur.x - prev.x) >= Math.abs(cur.y - prev.y)) {
+        snapped.push({ ...cur, y: prev.y, t }); // horizontal segment
+      } else {
+        snapped.push({ ...cur, x: prev.x, t }); // vertical segment
+      }
+    }
+    return snapped;
   }
 
   /* ═══════════════════════════════════════════════════════════
