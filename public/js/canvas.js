@@ -577,13 +577,10 @@ export class CanvasEngine {
     let _areaRect    = null;   /* cached once per gesture so layout queries don't race */
     this.canvasArea.addEventListener('touchstart', e => {
       if (e.touches.length === 2) {
-        /* If a single-finger pan was in progress, roll back any offset drift it
-           caused before the second finger arrived — that drift is the "jump". */
-        if (this._panning && this._panStart) {
-          this.offsetX = this._panStart.ox;
-          this.offsetY = this._panStart.oy;
-        }
-        /* Fully kill any active 1-finger pan state */
+        /* Kill single-finger pan state — but keep offsetX/Y exactly where they
+           are so the two-finger gesture starts from the current visual position.
+           Rolling back to _panStart would mismatch the CSS transform and cause
+           a visible snap on the first touchmove. */
         this._panning  = false;
         this._panStart = null;
         this._stopInertia();
