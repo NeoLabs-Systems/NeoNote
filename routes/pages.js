@@ -82,7 +82,7 @@ router.patch('/:id', (req, res) => {
   const db   = getDb();
   const page = ownedPage(db, req.params.id, uid(req));
   if (!page) return res.status(404).json({ error: 'Not found.' });
-  const { title, template, templateColor, bgColor, thumbnail } = req.body;
+  const { title, template, templateColor, bgColor, thumbnail, width, height } = req.body;
   db.prepare(`
     UPDATE pages
     SET title          = COALESCE(?, title),
@@ -90,9 +90,12 @@ router.patch('/:id', (req, res) => {
         template_color = COALESCE(?, template_color),
         bg_color       = COALESCE(?, bg_color),
         thumbnail      = COALESCE(?, thumbnail),
+        width          = COALESCE(?, width),
+        height         = COALESCE(?, height),
         updated_at     = unixepoch()
     WHERE id = ?
-  `).run(title ?? null, template ?? null, templateColor ?? null, bgColor ?? null, thumbnail ?? null, req.params.id);
+  `).run(title ?? null, template ?? null, templateColor ?? null, bgColor ?? null, thumbnail ?? null,
+         width ?? null, height ?? null, req.params.id);
   res.json({ ok: true });
 });
 

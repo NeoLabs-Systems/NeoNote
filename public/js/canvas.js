@@ -2,7 +2,7 @@
  * NeoNote — canvas.js
  * Full-featured drawing engine:
  *   • Pressure-sensitive strokes (PointerEvents API)
- *   • Tools: pen, pencil, marker, highlighter, eraser, text, line, rect, circle, arrow, lasso, select
+ *   • Tools: pen, highlighter, eraser, text, line, rect, circle, arrow, lasso, select
  *   • Catmull-Rom spline smoothing
  *   • Layers
  *   • Undo / redo (command pattern)
@@ -883,7 +883,7 @@ export class CanvasEngine {
       if (n === 1) {
         /* Don't pan with finger if a stylus is nearby and a draw tool is active
            (the pen draws, the finger should do nothing or is palm-rejected). */
-        const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
+        const _DRAW_TOOLS = ['pen', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
         if (this._penNearby && _DRAW_TOOLS.includes(this.tool)) return;
 
         /* Confirmed finger pan — take ownership of this touch to prevent scroll */
@@ -1075,7 +1075,7 @@ export class CanvasEngine {
     /* Touch input: panning is handled by touch events. Only allow touch-pointer
        through for drawing when pen nearby + draw tool + no palm rejection. */
     if (e.pointerType === 'touch') {
-      const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
+      const _DRAW_TOOLS = ['pen', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
       if (!this._penNearby) { console.log('[NoteNeo] _onDown BLOCKED: touch+penNearby=false'); return; }
       if (!_DRAW_TOOLS.includes(this.tool)) { console.log('[NoteNeo] _onDown BLOCKED: touch+notDrawTool'); return; }
       if (this._palmRejection) { console.log('[NoteNeo] _onDown BLOCKED: touch+palmRejection'); return; }
@@ -1232,7 +1232,7 @@ export class CanvasEngine {
        discarding it. On some iPads/Android tablets the browser fires pointercancel
        instead of pointerup for stylus input, which would cause every stroke to be
        lost.  Calling _onUp(null) runs the normal commit path (null = no event obj). */
-    const _COMMIT_TOOLS = ['pen', 'marker', 'highlighter', 'line', 'rect', 'circle', 'arrow'];
+    const _COMMIT_TOOLS = ['pen', 'highlighter', 'line', 'rect', 'circle', 'arrow'];
     if (_COMMIT_TOOLS.includes(this.tool) && this._points.length >= 1) {
       console.warn('[NoteNeo] committing stroke via cancel-rescue path');
       this._onUp(null);
@@ -1283,7 +1283,7 @@ export class CanvasEngine {
       console.log('[NoteNeo] _onUp EARLY RETURN: pts.length < 2 =', pts.length);
       this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
       /* Single tap → place a dot for drawing tools */
-      if (pts.length === 1 && ['pen', 'marker', 'highlighter'].includes(this.tool)) {
+      if (pts.length === 1 && ['pen', 'highlighter'].includes(this.tool)) {
         const p = pts[0];
         const dotStroke = {
           id: this._uuid(), layerId: layer.id, pageId: this.pageId,
@@ -2083,7 +2083,7 @@ export class CanvasEngine {
     if (e.key === ' ') { e.preventDefault(); this._spaceDown = true; this.canvasArea.style.cursor = 'grab'; }
 
     /* Tool shortcuts */
-    const toolMap = { p: 'pen', m: 'marker', h: 'highlighter', e: 'eraser', t: 'text', l: 'lasso' };
+    const toolMap = { p: 'pen', h: 'highlighter', e: 'eraser', t: 'text', l: 'lasso' };
     if (!e.metaKey && !e.ctrlKey && toolMap[e.key]) { this.setTool(toolMap[e.key]); }
   }
 
@@ -2174,7 +2174,7 @@ export class CanvasEngine {
       this._drawSelectOverlay();
     }
     const cursors = {
-      pen: 'crosshair', marker: 'crosshair',
+      pen: 'crosshair',
       highlighter: 'crosshair', eraser: 'cell', text: 'text',
       select: 'default', lasso: 'crosshair',
       line: 'crosshair', rect: 'crosshair', circle: 'crosshair', arrow: 'crosshair',
