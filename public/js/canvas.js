@@ -597,6 +597,16 @@ export class CanvasEngine {
         e.preventDefault();
         /* Completely suppress pointer-event pan from this point on */
         this._twoFingerActive = true;
+
+        /* If a single-finger pan was already in progress (finger landed on the
+           canvas → pointerdown fired → _onDown started panning before the 2nd
+           finger arrived), undo any offset drift it caused and re-sync the
+           visual transform so the snapshot below reflects the true pre-pan state. */
+        if (this._panStart) {
+          this.offsetX = this._panStart.ox;
+          this.offsetY = this._panStart.oy;
+          this._applyTransform();
+        }
         this._panning  = false;
         this._panStart = null;
         this._stopInertia();
