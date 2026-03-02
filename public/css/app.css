@@ -625,6 +625,29 @@ a:hover      { text-decoration: underline; }
 }
 @keyframes toast-in { from { opacity:0; transform: translateX(-50%) translateY(10px); } }
 
+/* ── Selection toolbar ───────────────────────────────────────── */
+.select-toolbar {
+  position: absolute; z-index: 200;
+  display: flex; align-items: center; gap: 2px;
+  background: var(--surface); border: 1px solid var(--border-mid);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow);
+  padding: 4px;
+  animation: ctx-in .12s ease;
+  pointer-events: all;
+}
+.sel-tb-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border: none; background: transparent;
+  cursor: pointer; font-family: inherit; font-size: .82rem;
+  color: var(--text-2); border-radius: var(--radius-xs);
+  transition: background var(--trans), color var(--trans);
+  white-space: nowrap;
+}
+.sel-tb-btn:hover { background: var(--surface3); color: var(--text); }
+.sel-tb-btn-danger { color: var(--danger); }
+.sel-tb-btn-danger:hover { background: var(--danger-dim); color: var(--danger); }
+.sel-tb-divider { width: 1px; height: 20px; background: var(--border-mid); margin: 0 2px; }
+
 /* ── Dividers ─────────────────────────────────────────────────── */
 .divider-v { width: 1px; height: 20px; background: var(--border-mid); margin: 0 2px; }
 
