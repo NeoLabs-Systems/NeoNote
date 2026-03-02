@@ -575,99 +575,169 @@ export class CanvasEngine {
     /* Context menu prevent */
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    /* ── Two-finger pan + pinch-zoom ───────────────────────────
-       Strategy: snapshot the full transform state the moment BOTH fingers are
-       confirmed down, then recompute offsetX/Y/scale from scratch on EVERY
-       touchmove relative to that snapshot.  This is completely stateless across
-       frames—no incremental drift, no dependency on pointer-event ordering. */
-    let _g = null;   /* gesture snapshot — null when no 2-finger gesture active */
+    /* ── Unified touch gesture system ─────────────────────────────
+       ALL finger-based panning (1-finger) and pinch-zoom (2-finger) is handled
+       here via Touch Events.  Pointer events are completely excluded from touch
+       panning — they only handle pen/mouse/keyboard input.  This eliminates the
+       race condition where pointerdown starts a pan before the 2nd finger arrives
+       and the touchstart handler tries to reconcile the drifted state. */
 
-    const _endGesture = () => {
-      if (!_g) return;
-      const dt = Date.now() - _g.lastT;
-      if (dt < 100 && (Math.abs(_g.velX) > 0.05 || Math.abs(_g.velY) > 0.05)) {
-        this._startInertia(_g.velX, _g.velY);
-      }
-      _g = null;
-      this._twoFingerActive = false;
-    };
+    /* _tg = touch gesture state.  null when no touch gesture active. */
+    let _tg = null;
 
     this.canvasArea.addEventListener('touchstart', e => {
-      if (e.touches.length >= 2) {
-        e.preventDefault();
-        /* Completely suppress pointer-event pan from this point on */
-        this._twoFingerActive = true;
+      const n = e.touches.length;
+      if (n === 0) return;
+      e.preventDefault();
 
-        /* If a single-finger pan was already in progress (finger landed on the
-           canvas → pointerdown fired → _onDown started panning before the 2nd
-           finger arrived), undo any offset drift it caused and re-sync the
-           visual transform so the snapshot below reflects the true pre-pan state. */
-        if (this._panStart) {
-          this.offsetX = this._panStart.ox;
-          this.offsetY = this._panStart.oy;
-          this._applyTransform();
-        }
+      /* ── 2+ fingers: start / restart pinch-zoom ────────────── */
+      if (n >= 2) {
+        /* Mark active so pointer events back off completely */
+        this._twoFingerActive = true;
         this._panning  = false;
         this._panStart = null;
         this._stopInertia();
+        /* Cancel any in-progress touch drawing that the first finger might have
+           started via pointer events before we realized it's a multi-touch gesture */
+        if (this._drawing && this._drawingPointerId != null) {
+          this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
+          this._drawing = false;
+          this._drawingPointerId = null;
+          this._points = [];
+        }
 
-        /* Snapshot current visual state + both finger positions */
-        const areaRect = this.canvasArea.getBoundingClientRect();
+        const rect = this.canvasArea.getBoundingClientRect();
         const t0 = e.touches[0], t1 = e.touches[1];
-        const mx = (t0.clientX + t1.clientX) / 2 - areaRect.left;
-        const my = (t0.clientY + t1.clientY) / 2 - areaRect.top;
-        _g = {
-          /* transform at gesture start */
+        const mx = (t0.clientX + t1.clientX) / 2 - rect.left;
+        const my = (t0.clientY + t1.clientY) / 2 - rect.top;
+        _tg = {
+          mode:     'pinch',
+          rect,
+          /* snapshot at pinch start */
           offsetX0: this.offsetX,
           offsetY0: this.offsetY,
           scale0:   this.scale,
-          /* midpoint at gesture start (area-relative px) */
-          mx0: mx,
-          my0: my,
-          /* finger distance at gesture start */
-          dist0: Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY),
-          /* for inertia */
+          mx0:      mx,
+          my0:      my,
+          dist0:    Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY),
+          /* inertia tracking */
           lastMx: mx, lastMy: my, lastT: Date.now(),
           velX: 0, velY: 0,
-          areaRect,
+        };
+        return;
+      }
+
+      /* ── 1 finger: start pan ───────────────────────────────── */
+      if (n === 1) {
+        /* Don't pan with finger if a stylus is nearby and a draw tool is active
+           (the pen draws, the finger should do nothing or is palm-rejected). */
+        const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
+        if (this._penNearby && _DRAW_TOOLS.includes(this.tool)) return;
+
+        this._stopInertia();
+        const t = e.touches[0];
+        _tg = {
+          mode:  'pan',
+          startX: t.clientX,
+          startY: t.clientY,
+          ox:     this.offsetX,
+          oy:     this.offsetY,
+          lastX:  t.clientX,
+          lastY:  t.clientY,
+          lastT:  Date.now(),
+          velX: 0, velY: 0,
         };
       }
     }, { passive: false });
 
     this.canvasArea.addEventListener('touchmove', e => {
-      if (e.touches.length >= 2 && _g) {
-        e.preventDefault();
-        const now  = Date.now();
-        const t0   = e.touches[0], t1 = e.touches[1];
-        const mx1  = (t0.clientX + t1.clientX) / 2 - _g.areaRect.left;
-        const my1  = (t0.clientY + t1.clientY) / 2 - _g.areaRect.top;
+      if (!_tg) return;
+      e.preventDefault();
+      const n = e.touches.length;
+
+      /* ── Pinch-zoom mode ───────────────────────────────────── */
+      if (_tg.mode === 'pinch' && n >= 2) {
+        const now = Date.now();
+        const t0 = e.touches[0], t1 = e.touches[1];
+        const mx1  = (t0.clientX + t1.clientX) / 2 - _tg.rect.left;
+        const my1  = (t0.clientY + t1.clientY) / 2 - _tg.rect.top;
         const dist1 = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
 
         /* Scale ratio relative to gesture start */
-        const r = _g.dist0 > 1 ? dist1 / _g.dist0 : 1;
-        const newScale = Math.max(0.05, Math.min(10, _g.scale0 * r));
+        const r = _tg.dist0 > 1 ? dist1 / _tg.dist0 : 1;
+        const newScale = Math.max(0.05, Math.min(10, _tg.scale0 * r));
 
-        /* From-scratch offset: the page point that was under the start midpoint
-           must now appear under the current midpoint at the new scale.
-           page_point = (mx0 - offsetX0) / scale0
-           offsetX_new = mx1 - page_point * newScale
-                       = mx1 - (mx0 - offsetX0) * r          */
+        /* From-scratch offset: page point under start midpoint → current midpoint */
         this.scale   = newScale;
-        this.offsetX = mx1 - (_g.mx0 - _g.offsetX0) * r;
-        this.offsetY = my1 - (_g.my0 - _g.offsetY0) * r;
+        this.offsetX = mx1 - (_tg.mx0 - _tg.offsetX0) * r;
+        this.offsetY = my1 - (_tg.my0 - _tg.offsetY0) * r;
 
-        /* Inertia velocity (px/ms) from midpoint movement */
-        const dt = Math.max(1, now - _g.lastT);
-        _g.velX  = (mx1 - _g.lastMx) / dt;
-        _g.velY  = (my1 - _g.lastMy) / dt;
-        _g.lastMx = mx1; _g.lastMy = my1; _g.lastT = now;
+        /* Inertia velocity */
+        const dt = Math.max(1, now - _tg.lastT);
+        _tg.velX  = (mx1 - _tg.lastMx) / dt;
+        _tg.velY  = (my1 - _tg.lastMy) / dt;
+        _tg.lastMx = mx1; _tg.lastMy = my1; _tg.lastT = now;
 
+        this._applyTransform();
+        return;
+      }
+
+      /* ── 1-finger pan mode ─────────────────────────────────── */
+      if (_tg.mode === 'pan' && n >= 1) {
+        const now = Date.now();
+        const t = e.touches[0];
+        const newX = _tg.ox + (t.clientX - _tg.startX);
+        const newY = _tg.oy + (t.clientY - _tg.startY);
+
+        const dt = Math.max(1, now - _tg.lastT);
+        _tg.velX = (t.clientX - _tg.lastX) / dt;
+        _tg.velY = (t.clientY - _tg.lastY) / dt;
+        _tg.lastX = t.clientX;
+        _tg.lastY = t.clientY;
+        _tg.lastT = now;
+
+        this.offsetX = newX;
+        this.offsetY = newY;
         this._applyTransform();
       }
     }, { passive: false });
 
-    this.canvasArea.addEventListener('touchend',    _endGesture, { passive: false });
-    this.canvasArea.addEventListener('touchcancel', _endGesture, { passive: false });
+    const _touchEnd = e => {
+      if (!_tg) return;
+      const n = e.touches.length;
+
+      /* If fingers remaining and was pinching, keep going (finger replaced) */
+      if (n >= 2 && _tg.mode === 'pinch') return;
+
+      /* Transition pinch → single-finger pan (one finger lifted) */
+      if (n === 1 && _tg.mode === 'pinch') {
+        const t = e.touches[0];
+        _tg = {
+          mode:   'pan',
+          startX: t.clientX,
+          startY: t.clientY,
+          ox:     this.offsetX,
+          oy:     this.offsetY,
+          lastX:  t.clientX,
+          lastY:  t.clientY,
+          lastT:  Date.now(),
+          velX: 0, velY: 0,
+        };
+        this._twoFingerActive = false;
+        return;
+      }
+
+      /* All fingers up — end gesture, maybe inertia */
+      const vel = _tg;
+      _tg = null;
+      this._twoFingerActive = false;
+      const dt = Date.now() - vel.lastT;
+      if (dt < 100 && (Math.abs(vel.velX) > 0.05 || Math.abs(vel.velY) > 0.05)) {
+        this._startInertia(vel.velX, vel.velY);
+      }
+    };
+    this.canvasArea.addEventListener('touchend',    _touchEnd, { passive: false });
+    this.canvasArea.addEventListener('touchcancel', _touchEnd, { passive: false });
 
     /* Space key release */
     document.addEventListener('keyup', e => {
@@ -750,8 +820,9 @@ export class CanvasEngine {
 
   _onDown(e) {
     e.preventDefault();
-    /* A 2-finger touch gesture owns the view - ignore all pointer events from
-       individual fingers so they can never start a pan or draw mid-gesture. */
+    /* Touch panning/zoom is handled entirely by the unified touch event system
+       (touchstart/touchmove/touchend on canvasArea).  Pointer events must NEVER
+       start a pan for touch input. */
     if (this._twoFingerActive) return;
     /* Stop any ongoing inertia scroll when a new gesture starts */
     this._stopInertia();
@@ -764,24 +835,15 @@ export class CanvasEngine {
       this._drawingPointerId = null;
       this._points = [];
     }
-    /* One-finger pan: if no pen/stylus is nearby, treat single-finger touch as a
-       scroll gesture regardless of the active drawing tool (palm-rejection bypass). */
-    if (e.pointerType === 'touch' && e.isPrimary && !this._penNearby) {
-      this._panning = true;
-      this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
-      this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
-      return;
+    /* Touch input: panning is handled by touch events. Only allow touch-pointer
+       through for drawing when pen nearby + draw tool + no palm rejection. */
+    if (e.pointerType === 'touch') {
+      const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
+      if (!this._penNearby) return;
+      if (!_DRAW_TOOLS.includes(this.tool)) return;
+      if (this._palmRejection) return;
+      /* Fall through: finger drawing with palm rejection OFF */
     }
-    /* Single-finger touch pan when no drawing tool is active (pen IS nearby) */
-    const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
-    if (e.pointerType === 'touch' && e.isPrimary && !_DRAW_TOOLS.includes(this.tool)) {
-      this._panning = true;
-      this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
-      this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
-      return;
-    }
-    /* Palm rejection for drawing tools when touch input */
-    if (this._palmRejection && e.pointerType === 'touch') return;
     /* Space + drag = pan */
     if (this._spaceDown) {
       this._panning = true; this._panStart = { x: e.clientX, y: e.clientY, ox: this.offsetX, oy: this.offsetY };
