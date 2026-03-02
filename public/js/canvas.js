@@ -897,19 +897,12 @@ export class CanvasEngine {
       this._points = [];
     }
     /* Touch input: panning is handled by touch events. Only allow touch-pointer
-       through for drawing when pen nearby + draw tool + no palm rejection.
-       EXCEPTION: a touch contact with very small area (< 6px) is almost certainly
-       a stylus tip masquerading as touch — let it draw regardless of palm rejection. */
+       through for drawing when pen nearby + draw tool + no palm rejection. */
     if (e.pointerType === 'touch') {
       const _DRAW_TOOLS = ['pen', 'marker', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
-      const isStylusTip = (e.width != null && e.height != null && e.width < 6 && e.height < 6);
-      if (!isStylusTip) {
-        if (!this._penNearby) { console.log('[NoteNeo] _onDown BLOCKED: touch+penNearby=false'); return; }
-        if (!_DRAW_TOOLS.includes(this.tool)) { console.log('[NoteNeo] _onDown BLOCKED: touch+notDrawTool'); return; }
-        if (this._palmRejection) { console.log('[NoteNeo] _onDown BLOCKED: touch+palmRejection'); return; }
-      } else {
-        console.log('[NoteNeo] _onDown: treating touch as stylus tip (w:', e.width, 'h:', e.height, ')');
-      }
+      if (!this._penNearby) { console.log('[NoteNeo] _onDown BLOCKED: touch+penNearby=false'); return; }
+      if (!_DRAW_TOOLS.includes(this.tool)) { console.log('[NoteNeo] _onDown BLOCKED: touch+notDrawTool'); return; }
+      if (this._palmRejection) { console.log('[NoteNeo] _onDown BLOCKED: touch+palmRejection'); return; }
     }
     /* Space + drag = pan */
     if (this._spaceDown) {
