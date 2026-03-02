@@ -574,18 +574,22 @@ export class CanvasEngine {
 
     /* Touch pan (2-finger) + pinch zoom */
     let _lastTouches = null;
+    let _areaRect    = null;   /* cached once per gesture so layout queries don't race */
     this.canvasArea.addEventListener('touchstart', e => {
       if (e.touches.length === 2) {
+        /* Snapshot the area rect NOW while layout is stable */
+        _areaRect    = this.canvasArea.getBoundingClientRect();
         _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY, t: Date.now() }));
-        /* Stop any active 1-finger pointer pan so it doesn't fight the 2-finger gesture */
-        this._panning = false;
+        /* Fully kill any active 1-finger pan state so it can't interfere */
+        this._panning  = false;
+        this._panStart = null;
         this._stopInertia();
         this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
         e.preventDefault();
       }
     }, { passive: false });
     this.canvasArea.addEventListener('touchmove', e => {
-      if (e.touches.length === 2 && _lastTouches) {
+      if (e.touches.length === 2 && _lastTouches && _areaRect) {
         e.preventDefault();
         const t = e.touches;
         const now = Date.now();
@@ -599,14 +603,14 @@ export class CanvasEngine {
         const d1 = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
         const d0 = Math.hypot(_lastTouches[0].clientX - _lastTouches[1].clientX, _lastTouches[0].clientY - _lastTouches[1].clientY);
 
-        /* Combined pan + zoom in one atomic step so the two transforms never
-           interfere.  The page point that was under the OLD midpoint ends up
-           exactly under the NEW midpoint, with the correct scale applied. */
-        const rect = this.canvasArea.getBoundingClientRect();
-        const cx0 = mx0 - rect.left;
-        const cy0 = my0 - rect.top;
-        const cx1 = mx1 - rect.left;
-        const cy1 = my1 - rect.top;
+        /* Combined pan + zoom in one atomic step.
+           Use the cached rect (stable coordinate origin for the whole gesture).
+           The page point under the OLD midpoint ends up exactly under the NEW
+           midpoint, with the new scale applied. */
+        const cx0 = mx0 - _areaRect.left;
+        const cy0 = my0 - _areaRect.top;
+        const cx1 = mx1 - _areaRect.left;
+        const cy1 = my1 - _areaRect.top;
         const newScale = (d0 > 1)
           ? Math.max(0.05, Math.min(10, this.scale * d1 / d0))
           : this.scale;
@@ -633,6 +637,7 @@ export class CanvasEngine {
           this._startInertia(this._panVelX, this._panVelY);
         }
         _lastTouches = null;
+        _areaRect    = null;
       }
     }, { passive: false });
 
