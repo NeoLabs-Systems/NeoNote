@@ -109,6 +109,9 @@ export class CanvasEngine {
     this._panRafId = null;
     this._panLastT = 0;
 
+    /* Set to true while a 2-finger gesture is active — blocks pointer-event pan */
+    this._twoFingerActive = false;
+
     /* Selection toolbar element */
     this._selectToolbar = document.getElementById('select-toolbar');
     this._selectionBbox = null;
@@ -572,77 +575,89 @@ export class CanvasEngine {
     /* Context menu prevent */
     canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-    /* Touch pan (2-finger) + pinch zoom */
-    let _lastTouches = null;
-    let _areaRect    = null;   /* cached once per gesture so layout queries don't race */
+    /* ── Two-finger pan + pinch-zoom ───────────────────────────
+       Strategy: snapshot the full transform state the moment BOTH fingers are
+       confirmed down, then recompute offsetX/Y/scale from scratch on EVERY
+       touchmove relative to that snapshot.  This is completely stateless across
+       frames—no incremental drift, no dependency on pointer-event ordering. */
+    let _g = null;   /* gesture snapshot — null when no 2-finger gesture active */
+
+    const _endGesture = () => {
+      if (!_g) return;
+      const dt = Date.now() - _g.lastT;
+      if (dt < 100 && (Math.abs(_g.velX) > 0.05 || Math.abs(_g.velY) > 0.05)) {
+        this._startInertia(_g.velX, _g.velY);
+      }
+      _g = null;
+      this._twoFingerActive = false;
+    };
+
     this.canvasArea.addEventListener('touchstart', e => {
-      if (e.touches.length === 2) {
-        /* Kill single-finger pan state — but keep offsetX/Y exactly where they
-           are so the two-finger gesture starts from the current visual position.
-           Rolling back to _panStart would mismatch the CSS transform and cause
-           a visible snap on the first touchmove. */
+      if (e.touches.length >= 2) {
+        e.preventDefault();
+        /* Completely suppress pointer-event pan from this point on */
+        this._twoFingerActive = true;
         this._panning  = false;
         this._panStart = null;
         this._stopInertia();
-        this._panVelX = 0; this._panVelY = 0; this._panLastT = Date.now();
-        /* Snapshot the area rect NOW while layout is stable */
-        _areaRect    = this.canvasArea.getBoundingClientRect();
-        _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY, t: Date.now() }));
-        e.preventDefault();
+
+        /* Snapshot current visual state + both finger positions */
+        const areaRect = this.canvasArea.getBoundingClientRect();
+        const t0 = e.touches[0], t1 = e.touches[1];
+        const mx = (t0.clientX + t1.clientX) / 2 - areaRect.left;
+        const my = (t0.clientY + t1.clientY) / 2 - areaRect.top;
+        _g = {
+          /* transform at gesture start */
+          offsetX0: this.offsetX,
+          offsetY0: this.offsetY,
+          scale0:   this.scale,
+          /* midpoint at gesture start (area-relative px) */
+          mx0: mx,
+          my0: my,
+          /* finger distance at gesture start */
+          dist0: Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY),
+          /* for inertia */
+          lastMx: mx, lastMy: my, lastT: Date.now(),
+          velX: 0, velY: 0,
+          areaRect,
+        };
       }
     }, { passive: false });
+
     this.canvasArea.addEventListener('touchmove', e => {
-      if (e.touches.length === 2 && _lastTouches && _areaRect) {
+      if (e.touches.length >= 2 && _g) {
         e.preventDefault();
-        const t = e.touches;
-        const now = Date.now();
+        const now  = Date.now();
+        const t0   = e.touches[0], t1 = e.touches[1];
+        const mx1  = (t0.clientX + t1.clientX) / 2 - _g.areaRect.left;
+        const my1  = (t0.clientY + t1.clientY) / 2 - _g.areaRect.top;
+        const dist1 = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
 
-        const mx0 = (_lastTouches[0].clientX + _lastTouches[1].clientX) / 2;
-        const my0 = (_lastTouches[0].clientY + _lastTouches[1].clientY) / 2;
-        const mx1 = (t[0].clientX + t[1].clientX) / 2;
-        const my1 = (t[0].clientY + t[1].clientY) / 2;
-        const dx = mx1 - mx0, dy = my1 - my0;
+        /* Scale ratio relative to gesture start */
+        const r = _g.dist0 > 1 ? dist1 / _g.dist0 : 1;
+        const newScale = Math.max(0.05, Math.min(10, _g.scale0 * r));
 
-        const d1 = Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-        const d0 = Math.hypot(_lastTouches[0].clientX - _lastTouches[1].clientX, _lastTouches[0].clientY - _lastTouches[1].clientY);
-
-        /* Combined pan + zoom in one atomic step.
-           Use the cached rect (stable coordinate origin for the whole gesture).
-           The page point under the OLD midpoint ends up exactly under the NEW
-           midpoint, with the new scale applied. */
-        const cx0 = mx0 - _areaRect.left;
-        const cy0 = my0 - _areaRect.top;
-        const cx1 = mx1 - _areaRect.left;
-        const cy1 = my1 - _areaRect.top;
-        const newScale = (d0 > 1)
-          ? Math.max(0.05, Math.min(10, this.scale * d1 / d0))
-          : this.scale;
-        const ratio = newScale / this.scale;
-        this.offsetX = cx1 - (cx0 - this.offsetX) * ratio;
-        this.offsetY = cy1 - (cy0 - this.offsetY) * ratio;
+        /* From-scratch offset: the page point that was under the start midpoint
+           must now appear under the current midpoint at the new scale.
+           page_point = (mx0 - offsetX0) / scale0
+           offsetX_new = mx1 - page_point * newScale
+                       = mx1 - (mx0 - offsetX0) * r          */
         this.scale   = newScale;
+        this.offsetX = mx1 - (_g.mx0 - _g.offsetX0) * r;
+        this.offsetY = my1 - (_g.my0 - _g.offsetY0) * r;
 
-        /* Track velocity for inertia (pixels/ms) */
-        const dt = Math.max(1, now - _lastTouches[0].t);
-        this._panVelX = dx / dt;
-        this._panVelY = dy / dt;
-        this._panLastT = now;
+        /* Inertia velocity (px/ms) from midpoint movement */
+        const dt = Math.max(1, now - _g.lastT);
+        _g.velX  = (mx1 - _g.lastMx) / dt;
+        _g.velY  = (my1 - _g.lastMy) / dt;
+        _g.lastMx = mx1; _g.lastMy = my1; _g.lastT = now;
 
         this._applyTransform();
-        _lastTouches = Array.from(e.touches).map(t => ({ clientX: t.clientX, clientY: t.clientY, t: now }));
       }
     }, { passive: false });
-    this.canvasArea.addEventListener('touchend', () => {
-      if (_lastTouches) {
-        const dt = Date.now() - this._panLastT;
-        /* Start inertia only if the last move was recent (< 100 ms) */
-        if (dt < 100 && (Math.abs(this._panVelX) > 0.05 || Math.abs(this._panVelY) > 0.05)) {
-          this._startInertia(this._panVelX, this._panVelY);
-        }
-        _lastTouches = null;
-        _areaRect    = null;
-      }
-    }, { passive: false });
+
+    this.canvasArea.addEventListener('touchend',    _endGesture, { passive: false });
+    this.canvasArea.addEventListener('touchcancel', _endGesture, { passive: false });
 
     /* Space key release */
     document.addEventListener('keyup', e => {
@@ -725,6 +740,9 @@ export class CanvasEngine {
 
   _onDown(e) {
     e.preventDefault();
+    /* A 2-finger touch gesture owns the view - ignore all pointer events from
+       individual fingers so they can never start a pan or draw mid-gesture. */
+    if (this._twoFingerActive) return;
     /* Stop any ongoing inertia scroll when a new gesture starts */
     this._stopInertia();
 
@@ -818,6 +836,8 @@ export class CanvasEngine {
 
   _onMove(e) {
     e.preventDefault();
+    /* Ignore pointer-move events during an active 2-finger gesture */
+    if (this._twoFingerActive) return;
     const pt = this._screenToPage(e.clientX, e.clientY);
     this.onStatusUpdate({ coords: `${Math.round(pt.x)}, ${Math.round(pt.y)}` });
 
