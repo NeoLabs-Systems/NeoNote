@@ -898,6 +898,10 @@ export class CanvasEngine {
         const _DRAW_TOOLS = ['pen', 'highlighter', 'eraser', 'line', 'rect', 'circle', 'arrow'];
         if (this._penNearby && _DRAW_TOOLS.includes(this.tool)) return;
 
+        /* If the touch is on a UI overlay (e.g. selection toolbar), let it through
+           so click events fire on buttons inside canvasArea. */
+        if (e.touches[0].target.closest('#select-toolbar')) return;
+
         /* Confirmed finger pan — take ownership of this touch to prevent scroll */
         e.preventDefault();
         this._stopInertia();
