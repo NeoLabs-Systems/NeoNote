@@ -360,6 +360,12 @@ async function openPageEditor(pageId) {
         $('btn-redo').disabled = !canRedo;
       },
       onLayersChange: (layers, activeIdx) => renderLayersPanel(layers, activeIdx),
+      onToolChange: (tool) => {
+        document.querySelectorAll('.tool-btn[data-tool]').forEach(b => b.classList.remove('active'));
+        document.querySelector(`.tool-btn[data-tool="${tool}"]`)?.classList.add('active');
+        $('status-tool').textContent = tool.charAt(0).toUpperCase() + tool.slice(1);
+        updateToolPanel(tool);
+      },
       onActivePageChange: (idx) => {
         editorPageIdx = idx;
         if (editorPages[idx]) {
@@ -369,6 +375,7 @@ async function openPageEditor(pageId) {
     });
     applySettings(state.settings);
     bindCanvasEngineToolbar();
+    updateToolPanel('pen'); // default tool on open
     /* Expose for automated tests (harmless in production) */
     window._canvasEngine = engine;
     /* Debug log button */
@@ -540,76 +547,301 @@ function bindCanvasEngineToolbar() {
     document.querySelectorAll('.color-preset-btn').forEach(el => el.classList.remove('active'));
   });
 
-  /* ── 3 Customisable quick-colour presets ───────────────── */
-  const PRESET_KEY      = 'neonote_color_presets';
-  const DEFAULT_PRESETS = ['#ef4444', '#22c55e', '#6366f1'];
+  /* ══════════════════════════════════════════════════════════
+     PRESET BUBBLE — shared for color + thickness presets
+     ══════════════════════════════════════════════════════════ */
 
-  function loadPresets() {
-    try { return JSON.parse(localStorage.getItem(PRESET_KEY)) || DEFAULT_PRESETS; } catch { return DEFAULT_PRESETS; }
+  const PRESET_KEY             = 'neonote_color_presets';
+  const DEFAULT_PRESETS        = ['#ef4444', '#22c55e', '#6366f1'];
+  const THICKNESS_PRESET_KEY   = 'neonote_thickness_presets';
+  const DEFAULT_THICKNESS_PRESETS = [2, 5, 14];
+
+  let colorPresets     = (() => { try { return JSON.parse(localStorage.getItem(PRESET_KEY)) || DEFAULT_PRESETS; } catch { return DEFAULT_PRESETS; } })();
+  let thicknessPresets = (() => { try { return JSON.parse(localStorage.getItem(THICKNESS_PRESET_KEY)) || DEFAULT_THICKNESS_PRESETS; } catch { return DEFAULT_THICKNESS_PRESETS; } })();
+
+  function saveColorPresets()     { localStorage.setItem(PRESET_KEY, JSON.stringify(colorPresets)); }
+  function saveThicknessPresets() { localStorage.setItem(THICKNESS_PRESET_KEY, JSON.stringify(thicknessPresets)); }
+
+  function thicknessToDotSize(v) { return Math.round(4 + (Math.min(v, 40) / 40) * 16); }
+
+  /* Render all preset button visuals */
+  function refreshColorPresetBtn(i) {
+    const dot = $(`color-preset-dot-${i}`);
+    if (dot) dot.style.background = colorPresets[i];
   }
-  function savePresets(arr) { localStorage.setItem(PRESET_KEY, JSON.stringify(arr)); }
+  function refreshThicknessPresetBtn(i) {
+    const dot = $(`thickness-preset-dot-${i}`);
+    if (!dot) return;
+    const d = thicknessToDotSize(thicknessPresets[i]) + 'px';
+    dot.style.width = d; dot.style.height = d;
+  }
+  for (let i = 0; i < 3; i++) { refreshColorPresetBtn(i); refreshThicknessPresetBtn(i); }
 
-  function applyPresets(arr) {
-    arr.forEach((color, i) => {
-      const dot = $(`color-preset-dot-${i}`);
-      if (dot) dot.style.background = color;
-    });
+  /* ── Bubble DOM refs ────────────────────────────────────── */
+  const bubble        = $('preset-bubble');
+  const pbColorEl     = $('pb-color');
+  const pbThicknessEl = $('pb-thickness');
+  const pbSwatch      = $('pb-color-swatch');
+  const pbColorPicker = $('pb-color-picker');
+  const pbHex         = $('pb-hex');
+  const pbChangeBtn   = $('pb-color-change');
+  const pbSlider      = $('pb-thickness-slider');
+  const pbSliderVal   = $('pb-thickness-val');
+  const pbPreviewCanvas = $('pb-stroke-preview');
+  const pbApplyBtn    = $('pb-apply');
+  const pbSaveBtn     = $('pb-save');
+  const bubbleArrow   = bubble.querySelector('.preset-bubble-arrow');
+
+  let _bubbleType  = null;   // 'color' | 'thickness'
+  let _bubbleIdx   = -1;
+  let _bubbleWorkingColor = '#000000';
+  let _bubbleWorkingThickness = 4;
+
+  function drawThicknessPreview(val) {
+    const ctx = pbPreviewCanvas.getContext('2d');
+    const w = pbPreviewCanvas.width, h = pbPreviewCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+    ctx.beginPath();
+    ctx.moveTo(16, h / 2);
+    ctx.lineTo(w - 16, h / 2);
+    ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--text').trim() || '#eeeef5';
+    ctx.lineWidth   = Math.min(val, h - 4);
+    ctx.lineCap     = 'round';
+    ctx.stroke();
   }
 
-  let colorPresets = loadPresets();
-  applyPresets(colorPresets);
+  function openBubble(type, idx, anchorBtn) {
+    _bubbleType = type;
+    _bubbleIdx  = idx;
 
-  for (let i = 0; i < 3; i++) {
-    const btn    = $(`color-preset-${i}`);
-    const picker = $(`color-preset-picker-${i}`);
-    if (!btn || !picker) continue;
+    /* Show correct content panel */
+    pbColorEl.style.display     = type === 'color'     ? '' : 'none';
+    pbThicknessEl.style.display = type === 'thickness' ? '' : 'none';
 
-    /* Single click → apply color */
-    btn.addEventListener('click', () => {
-      if (!engine) return;
-      const color = colorPresets[i];
-      engine.setColor(color);
-      $('active-color-swatch').style.background = color;
-      document.querySelectorAll('.qcolor').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.color-preset-btn').forEach(el => el.classList.remove('active'));
-      btn.classList.add('active');
-    });
+    if (type === 'color') {
+      _bubbleWorkingColor = colorPresets[idx];
+      pbSwatch.style.background = _bubbleWorkingColor;
+      pbHex.textContent = _bubbleWorkingColor;
+    } else {
+      _bubbleWorkingThickness = thicknessPresets[idx];
+      pbSlider.value      = _bubbleWorkingThickness;
+      pbSliderVal.textContent = _bubbleWorkingThickness;
+      drawThicknessPreview(_bubbleWorkingThickness);
+    }
 
-    /* Right-click or long-press → open colour picker to change preset */
-    btn.addEventListener('contextmenu', e => {
-      e.preventDefault();
-      picker.value = colorPresets[i];
-      picker.click();
-    });
+    /* Position bubble below the button */
+    bubble.style.display = 'block';
+    // Re-trigger animation
+    bubble.style.animation = 'none';
+    bubble.offsetHeight; // reflow
+    bubble.style.animation = '';
 
-    /* Long-press (touch) */
-    let _pressTimer = null;
-    btn.addEventListener('pointerdown', () => {
-      _pressTimer = setTimeout(() => {
-        picker.value = colorPresets[i];
-        picker.click();
-      }, 600);
-    });
-    btn.addEventListener('pointerup',     () => clearTimeout(_pressTimer));
-    btn.addEventListener('pointercancel', () => clearTimeout(_pressTimer));
+    const rect  = anchorBtn.getBoundingClientRect();
+    const bw    = 210;
+    let   left  = rect.left + rect.width / 2 - bw / 2;
+    left = Math.max(6, Math.min(left, window.innerWidth - bw - 6));
+    const top   = rect.bottom + 10;
+    bubble.style.left = left + 'px';
+    bubble.style.top  = top  + 'px';
 
-    /* Color picker change → update preset */
-    picker.addEventListener('input', e => {
-      colorPresets[i] = e.target.value;
-      savePresets(colorPresets);
-      applyPresets(colorPresets);
-    });
+    /* Position the arrow to point at the button */
+    const arrowLeft = (rect.left + rect.width / 2) - left;
+    bubbleArrow.style.left = Math.max(12, Math.min(bw - 26, arrowLeft)) + 'px';
+    bubbleArrow.style.transform = 'none';
+  }
+
+  function closeBubble() {
+    bubble.style.display = 'none';
+    _bubbleType = null;
+    _bubbleIdx  = -1;
   }
 
   /* Active colour swatch — opens/closes style popup */
-  $('tool-style-btn').addEventListener('click', e => {
+  $('tool-style-btn')?.addEventListener('click', e => {
     e.stopPropagation();
     $('tool-color-popup').classList.toggle('open');
   });
-  $('tool-color-popup').addEventListener('click', e => e.stopPropagation());
+  $('tool-color-popup')?.addEventListener('click', e => e.stopPropagation());
+
+  /* Close on outside click */
+  bubble.addEventListener('click', e => e.stopPropagation());
   document.addEventListener('click', () => {
+    closeBubble();
     $('tool-color-popup')?.classList.remove('open');
   });
+
+  /* Color swatch → open native picker */
+  pbSwatch.addEventListener('click', () => pbColorPicker.click());
+  pbChangeBtn.addEventListener('click', () => pbColorPicker.click());
+  pbColorPicker.addEventListener('input', e => {
+    _bubbleWorkingColor = e.target.value;
+    pbSwatch.style.background = _bubbleWorkingColor;
+    pbHex.textContent = _bubbleWorkingColor;
+    /* Live-apply as you drag the color wheel */
+    engine?.setColor(_bubbleWorkingColor);
+    $('active-color-swatch').style.background = _bubbleWorkingColor;
+    document.querySelectorAll('.qcolor').forEach(el => el.classList.remove('active'));
+  });
+
+  /* Thickness slider */
+  pbSlider.addEventListener('input', () => {
+    _bubbleWorkingThickness = parseFloat(pbSlider.value);
+    pbSliderVal.textContent = _bubbleWorkingThickness;
+    drawThicknessPreview(_bubbleWorkingThickness);
+    /* Live-apply */
+    engine?.setWidth(_bubbleWorkingThickness);
+    $('stroke-width').value = _bubbleWorkingThickness;
+    $('stroke-width-val').textContent = _bubbleWorkingThickness;
+  });
+
+  /* Apply button — applies the working value without saving the preset */
+  pbApplyBtn.addEventListener('click', () => {
+    if (_bubbleType === 'color') {
+      engine?.setColor(_bubbleWorkingColor);
+      $('active-color-swatch').style.background = _bubbleWorkingColor;
+      document.querySelectorAll('.qcolor').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.color-preset-btn').forEach(el => el.classList.remove('active'));
+    } else if (_bubbleType === 'thickness') {
+      engine?.setWidth(_bubbleWorkingThickness);
+      $('stroke-width').value = _bubbleWorkingThickness;
+      $('stroke-width-val').textContent = _bubbleWorkingThickness;
+      document.querySelectorAll('.thickness-preset-btn').forEach(b => b.classList.remove('active'));
+    }
+    closeBubble();
+  });
+
+  /* Save preset button — saves new value into the slot */
+  pbSaveBtn.addEventListener('click', () => {
+    if (_bubbleIdx < 0) return;
+    if (_bubbleType === 'color') {
+      colorPresets[_bubbleIdx] = _bubbleWorkingColor;
+      saveColorPresets();
+      refreshColorPresetBtn(_bubbleIdx);
+      engine?.setColor(_bubbleWorkingColor);
+      $('active-color-swatch').style.background = _bubbleWorkingColor;
+      document.querySelectorAll('.qcolor').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.color-preset-btn').forEach(el => el.classList.remove('active'));
+      $(`color-preset-${_bubbleIdx}`)?.classList.add('active');
+    } else if (_bubbleType === 'thickness') {
+      thicknessPresets[_bubbleIdx] = _bubbleWorkingThickness;
+      saveThicknessPresets();
+      refreshThicknessPresetBtn(_bubbleIdx);
+      engine?.setWidth(_bubbleWorkingThickness);
+      $('stroke-width').value = _bubbleWorkingThickness;
+      $('stroke-width-val').textContent = _bubbleWorkingThickness;
+      document.querySelectorAll('.size-preset-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.thickness-preset-btn').forEach(b => b.classList.remove('active'));
+      $(`thickness-preset-${_bubbleIdx}`)?.classList.add('active');
+    }
+    closeBubble();
+  });
+
+  /* ── Color preset buttons ───────────────────────────────── */
+  for (let i = 0; i < 3; i++) {
+    const btn = $(`color-preset-${i}`);
+    if (!btn) continue;
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (bubble.style.display !== 'none' && _bubbleIdx === i && _bubbleType === 'color') {
+        closeBubble(); return;
+      }
+      /* First tap: apply the preset and open edit bubble */
+      engine?.setColor(colorPresets[i]);
+      $('active-color-swatch').style.background = colorPresets[i];
+      document.querySelectorAll('.qcolor').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.color-preset-btn').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.thickness-preset-btn').forEach(el => el.classList.remove('active'));
+      btn.classList.add('active');
+      openBubble('color', i, btn);
+    });
+  }
+
+  /* ── Thickness preset buttons ───────────────────────────── */
+  for (let i = 0; i < 3; i++) {
+    const btn = $(`thickness-preset-${i}`);
+    if (!btn) continue;
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      if (bubble.style.display !== 'none' && _bubbleIdx === i && _bubbleType === 'thickness') {
+        closeBubble(); return;
+      }
+      /* First tap: apply the preset and open edit bubble */
+      engine?.setWidth(thicknessPresets[i]);
+      $('stroke-width').value = thicknessPresets[i];
+      $('stroke-width-val').textContent = thicknessPresets[i];
+      document.querySelectorAll('.size-preset-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.color-preset-btn').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.thickness-preset-btn').forEach(el => el.classList.remove('active'));
+      btn.classList.add('active');
+      openBubble('thickness', i, btn);
+    });
+  }
+
+  /* ── Size preset dots ──────────────────────────────────── */
+  document.querySelectorAll('.size-preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const size = parseFloat(btn.dataset.size);
+      engine?.setWidth(size);
+      $('stroke-width').value = size;
+      $('stroke-width-val').textContent = size;
+      document.querySelectorAll('.size-preset-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  /* ── Pressure chips ────────────────────────────────────── */
+  document.querySelectorAll('#pen-pressure-chips .chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#pen-pressure-chips .chip').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      if (engine) engine.pressureEnabled = btn.dataset.pressure === 'on';
+    });
+  });
+
+  /* ── Blend mode chips (pen) ────────────────────────────── */
+  document.querySelectorAll('#pen-blend-chips .chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#pen-blend-chips .chip').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      engine?.setPenBlendMode(btn.dataset.blend);
+    });
+  });
+
+  /* ── Shape fill chips ──────────────────────────────────── */
+  document.querySelectorAll('#shape-fill-chips .chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#shape-fill-chips .chip').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      engine?.setShapeFillMode(btn.dataset.fill);
+    });
+  });
+}
+
+/* Contextual tool panel: show/hide sections based on active tool */
+function updateToolPanel(tool) {
+  const SHAPE_TOOLS = ['line', 'rect', 'circle', 'arrow'];
+  const showPen   = tool === 'pen';
+  const showShape = SHAPE_TOOLS.includes(tool);
+  const showText  = tool === 'text';
+  const hideSize  = tool === 'lasso' || tool === 'select';
+
+  const mark = (id, show) => {
+    const el = $(id);
+    if (!el) return;
+    el.classList.toggle('visible', show);
+  };
+
+  mark('section-pen-opts',   showPen);
+  mark('hr-pen',             showPen);
+  mark('section-shape-opts', showShape);
+  mark('hr-shape',           showShape);
+  mark('section-text-opts',  showText);
+  mark('hr-text',            showText);
+
+  const sizeSection = $('section-size');
+  const hrSize      = $('hr-size');
+  if (sizeSection) sizeSection.style.display = hideSize ? 'none' : '';
+  if (hrSize)      hrSize.style.display      = hideSize ? 'none' : '';
 }
 
 function bindEditorToolbar() {
@@ -621,6 +853,7 @@ function bindEditorToolbar() {
       btn.classList.add('active');
       engine.setTool(btn.dataset.tool);
       $('status-tool').textContent = btn.dataset.tool.charAt(0).toUpperCase() + btn.dataset.tool.slice(1);
+      updateToolPanel(btn.dataset.tool);
     });
   });
 

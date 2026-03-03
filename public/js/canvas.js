@@ -19,6 +19,10 @@ export class CanvasEngine {
     this._lineSnapActive = false;
     this._snapType       = null;   // 'line'|'circle'|'rect'|'polyline'|'rectilinear'
     this._snapPoints     = null;   // geometry computed at snap time
+    // Erase session — batches all deletions/splits into one undo step
+    this._eraseSession   = null;   // { layerId, snapshot }
+    // Barrel button: save tool before temp-switching to lasso
+    this._barrelPrevTool = null;
     this.onSave       = opts.onSave       || (() => {});
     this.onStatusUpdate = opts.onStatusUpdate || (() => {});
     this.onUndoRedoUpdate = opts.onUndoRedoUpdate || (() => {});
@@ -26,6 +30,7 @@ export class CanvasEngine {
     this.onActivePageChange = opts.onActivePageChange || null;
     this.onActivePageChange = opts.onActivePageChange || null;
     this.onActivePageChange = opts.onActivePageChange || null;
+    this.onToolChange = opts.onToolChange || (() => {});
 
     /* Page dimensions (logical, in CSS px at 100% zoom) */
     this.pageW = 1404;
@@ -54,11 +59,13 @@ export class CanvasEngine {
     this.activeLayerIdx = 0;
 
     /* Tool state */
-    this.tool     = 'pen';
-    this.color    = '#000000';
-    this.width    = 2.5;
-    this.opacity  = 1.0;
+    this.tool          = 'pen';
+    this.color         = '#000000';
+    this.width         = 2.5;
+    this.opacity       = 1.0;
     this.pressureEnabled = true;
+    this.shapeFillMode = 'none';  // 'none' | 'flat'
+    this.penBlendMode  = 'source-over'; // 'source-over' | 'multiply'
 
     /* Zoom / pan */
     this.scale    = 1.0;
@@ -615,6 +622,9 @@ export class CanvasEngine {
     }
   }
 
+  setShapeFillMode(mode) { this.shapeFillMode = mode; }
+  setPenBlendMode(mode) { this.penBlendMode = mode; }
+
   _renderShape(ctx, stroke) {
     const e = stroke.extra || {};
     ctx.save();
@@ -1061,6 +1071,14 @@ export class CanvasEngine {
     /* Touch panning/zoom is handled entirely by the unified touch event system
        (touchstart/touchmove/touchend on canvasArea).  Pointer events must NEVER
        start a pan for touch input. */
+    /* Barrel button (bit 5 of e.buttons) — pen not touching surface */
+    if (e.pointerType === 'pen' && (e.buttons & 32) && !(e.buttons & 1)) {
+      if (this._barrelPrevTool === null) {
+        this._barrelPrevTool = this.tool;
+        this.setTool('lasso');
+      }
+      return; /* don't start a stroke */
+    }
     if (this._twoFingerActive) { console.log('[NoteNeo] _onDown BLOCKED: twoFingerActive'); return; }
     /* Stop any ongoing inertia scroll when a new gesture starts */
     this._stopInertia();
@@ -1124,6 +1142,16 @@ export class CanvasEngine {
       return;
     }
     if (this.tool === 'eraser') {
+      /* Snapshot BEFORE first erase so the session captures the full pre-erase state */
+      const _el = this.layers[this.activeLayerIdx];
+      if (_el) {
+        this._eraseSession = {
+          layerId:  _el.id,
+          snapshot: this._strokes
+            .filter(s => s.layerId === _el.id)
+            .map(s => ({ ...s, points: s.points ? [...s.points] : [] })),
+        };
+      }
       this._eraseAt(pt.x, pt.y, this.width * 5);
     }
     if (this.tool === 'select') {
@@ -1272,6 +1300,7 @@ export class CanvasEngine {
     this._penPointerActive = false;
     this._points           = [];
     this._panning          = false;
+    this._eraseSession     = null;
     clearTimeout(this._lineSnapTimer);
     this._lineSnapActive = false;
     this._snapType       = null;
@@ -1280,6 +1309,14 @@ export class CanvasEngine {
   }
   _onUp(e) {
     console.log('[NoteNeo] _onUp type:', e?.pointerType, 'id:', e?.pointerId, 'drawing:', this._drawing, 'panning:', this._panning, 'points:', this._points.length);
+    /* Barrel button release (e.button === 5 on pointerup) — revert tool */
+    if (e && e.pointerType === 'pen' && e.button === 5) {
+      if (this._barrelPrevTool !== null) {
+        this.setTool(this._barrelPrevTool);
+        this._barrelPrevTool = null;
+      }
+      return;
+    }
     if (this._panning) {
       this._panning = false;
       /* Start inertia if the last move was recent and velocity is significant */
@@ -1340,8 +1377,21 @@ export class CanvasEngine {
     /* Commit stroke */
     if (this.tool === 'eraser') {
       console.log('[NoteNeo] _onUp EARLY RETURN: eraser');
-      /* Already handled in _onMove */
+      /* Finalize erase session → single undo entry for the whole drag */
+      if (this._eraseSession) {
+        const { layerId, snapshot } = this._eraseSession;
+        const beforeIds = new Set(snapshot.map(s => s.id));
+        const afterLayer = this._strokes.filter(s => s.layerId === layerId);
+        const afterIds   = new Set(afterLayer.map(s => s.id));
+        const deleted = snapshot.filter(s => !afterIds.has(s.id));
+        const added   = afterLayer.filter(s => !beforeIds.has(s.id));
+        if (deleted.length > 0 || added.length > 0) {
+          this._pushUndo({ type: 'erase', deleted, added });
+        }
+        this._eraseSession = null;
+      }
       this.aCtx.clearRect(0, 0, this.pageW, this.pageH);
+      this.oCtx.clearRect(0, 0, this.pageW, this.pageH);
       return;
     }
     if (this.tool === 'lasso') {
@@ -1370,7 +1420,8 @@ export class CanvasEngine {
             id: this._uuid(), layerId: layer.id, pageId: this.pageId,
             tool: _snapType, color: this.color, width: this.width,
             opacity: this.opacity, blendMode: 'source-over',
-            points: [p0, p1], bbox: this._computeBbox([p0, p1]), extra: null,
+            points: [p0, p1], bbox: this._computeBbox([p0, p1]),
+            extra: this.shapeFillMode === 'flat' ? { fill: this.color } : null,
           };
           this._strokes.push(stroke);
           this._renderLayer(layer);
@@ -1391,6 +1442,9 @@ export class CanvasEngine {
 
     if (['line','rect','circle','arrow'].includes(this.tool) && this._shapeStart) {
       finalPoints = [this._shapeStart, pts[pts.length - 1]];
+      if (['rect','circle'].includes(this.tool) && this.shapeFillMode === 'flat') {
+        extra = { fill: this.color };
+      }
     }
 
     try {
@@ -1403,7 +1457,7 @@ export class CanvasEngine {
         color: this.color,
         width: this.width,
         opacity: this.opacity,
-        blendMode: this.tool === 'highlighter' ? 'multiply' : 'source-over',
+        blendMode: this.tool === 'highlighter' ? 'multiply' : (this.tool === 'pen' ? this.penBlendMode : 'source-over'),
         points: finalPoints,
         bbox,
         extra,
@@ -1452,7 +1506,8 @@ export class CanvasEngine {
     if (['line','rect','circle','arrow'].includes(this.tool) && this._shapeStart) {
       const fakeStroke = {
         tool: this.tool, color: this.color, width: this.width, opacity: this.opacity,
-        blendMode: 'source-over', extra: {},
+        blendMode: 'source-over',
+        extra: (['rect','circle'].includes(this.tool) && this.shapeFillMode === 'flat') ? { fill: this.color } : {},
         points: [this._shapeStart, pt],
       };
       this._renderShape(ctx, fakeStroke);
@@ -1528,7 +1583,8 @@ export class CanvasEngine {
           this._renderShape(ctx, {
             tool: this._snapType, color: this.color, width: this.width,
             opacity: this.opacity, blendMode: 'source-over',
-            extra: {}, points: [p0, p1],
+            extra: this.shapeFillMode === 'flat' ? { fill: this.color } : {},
+            points: [p0, p1],
           });
           break;
         }
@@ -1738,21 +1794,54 @@ export class CanvasEngine {
      ERASER
      ═══════════════════════════════════════════════════════════ */
   _eraseAt(x, y, radius) {
-    const layer  = this.layers[this.activeLayerIdx];
+    const layer = this.layers[this.activeLayerIdx];
     if (!layer) return;
-    const before = this._strokes.filter(s => s.layerId === layer.id);
+
     const toDelete = [];
+    const toAdd    = [];
+
     this._strokes = this._strokes.filter(s => {
       if (s.layerId !== layer.id) return true;
       if (!s.points || s.points.length === 0) return true;
-      const hit = s.points.some(p => Math.hypot(p.x - x, p.y - y) < radius);
-      if (hit) { toDelete.push(s); return false; }
-      return true;
+
+      const anyHit = s.points.some(p => Math.hypot(p.x - x, p.y - y) < radius);
+      if (!anyHit) return true; // untouched
+
+      toDelete.push(s);
+
+      /* Text strokes and single-segment strokes: delete entirely */
+      if (s.tool === 'text' || s.points.length <= 2) return false;
+
+      /* Split: collect contiguous runs of points OUTSIDE the eraser circle */
+      const segments = [];
+      let seg = [];
+      for (const p of s.points) {
+        if (Math.hypot(p.x - x, p.y - y) >= radius) {
+          seg.push(p);
+        } else {
+          if (seg.length >= 2) segments.push(seg);
+          seg = [];
+        }
+      }
+      if (seg.length >= 2) segments.push(seg);
+
+      /* Create a new stroke for each surviving segment */
+      for (const pts of segments) {
+        toAdd.push({ ...s, id: this._uuid(), points: pts, bbox: this._computeBbox(pts) });
+      }
+
+      return false; // remove original
     });
-    if (toDelete.length > 0) {
+
+    /* Insert split fragments */
+    for (const s of toAdd) this._strokes.push(s);
+
+    if (toDelete.length > 0 || toAdd.length > 0) {
       this._renderLayer(layer);
-      this._pushUndo({ type: 'delete', strokes: toDelete });
+      /* Persist: delete originals, save new fragments */
       this._scheduleDelete(toDelete.map(s => s.id));
+      if (toAdd.length > 0) this._scheduleSave(toAdd);
+      /* Undo is batched at session level (_onUp) — don't push here */
     }
   }
 
@@ -2265,6 +2354,16 @@ export class CanvasEngine {
       this._strokes.push(...entry.strokes);
       this._scheduleSave(entry.strokes);
       otherStack.push({ type: 'add', strokes: entry.strokes });
+    } else if (entry.type === 'erase') {
+      /* Remove the split fragments that were added */
+      const addedIds = new Set(entry.added.map(s => s.id));
+      this._strokes = this._strokes.filter(s => !addedIds.has(s.id));
+      if (entry.added.length > 0) this._scheduleDelete(entry.added.map(s => s.id));
+      /* Restore the original strokes that were erased */
+      this._strokes.push(...entry.deleted);
+      if (entry.deleted.length > 0) this._scheduleSave(entry.deleted);
+      /* Swap deleted↔added so both undo and redo use the same inverse path */
+      otherStack.push({ type: 'erase', deleted: entry.added, added: entry.deleted });
     }
     this._renderAll();
   }
@@ -2435,6 +2534,7 @@ export class CanvasEngine {
       line: 'crosshair', rect: 'crosshair', circle: 'crosshair', arrow: 'crosshair',
     };
     this.activeCanvas.style.cursor = cursors[tool] || 'crosshair';
+    this.onToolChange(tool);
   }
 
   setColor(color) { this.color = color; }

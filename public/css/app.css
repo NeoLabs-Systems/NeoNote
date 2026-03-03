@@ -731,6 +731,9 @@ a:hover      { text-decoration: underline; }
   display: flex; align-items: center; justify-content: center;
   padding: 0 6px; cursor: pointer;
 }
+.active-color-wrap {
+  display: flex; align-items: center; gap: 2px;
+}
 .active-color {
   width: 26px; height: 26px; border-radius: 50%;
   border: 2.5px solid var(--border-hi); cursor: pointer;
@@ -738,24 +741,25 @@ a:hover      { text-decoration: underline; }
   box-shadow: 0 2px 8px rgba(0,0,0,.4);
 }
 .active-color:hover { border-color: var(--primary); transform: scale(1.1); }
+.style-btn-arrow { flex-shrink: 0; color: var(--text-3); }
 
-/* Tool popup panel (colour / size / opacity) */
+/* Tool popup panel (colour / size / opacity / tool options) */
 .tool-popup {
   display: none;
   position: absolute;
-  top: calc(100% + 10px); left: 50%; transform: translateX(-50%);
+  top: calc(100% + 12px); left: 50%; transform: translateX(-50%);
   background: var(--surface);
   border: 1px solid var(--border-mid);
   border-radius: var(--radius);
-  box-shadow: 0 8px 32px rgba(0,0,0,.65), 0 2px 8px rgba(0,0,0,.3);
+  box-shadow: 0 12px 40px rgba(0,0,0,.7), 0 2px 8px rgba(0,0,0,.3);
   padding: 14px;
-  width: 224px;
+  width: 248px;
   z-index: 100;
 }
 .tool-popup.open { display: block; }
 
 .quick-colors {
-  display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px;
+  display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px;
   width: 100%;
 }
 .qcolor {
@@ -770,11 +774,60 @@ a:hover      { text-decoration: underline; }
   display: flex; align-items: center; justify-content: center;
   font-size: .9rem; color: var(--text-3); font-weight: 500;
 }
+
+/* Size presets */
+.size-presets {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 4px; padding: 2px 0;
+}
+.size-preset-btn {
+  flex: 1; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--border-mid);
+  border-radius: var(--radius-sm);
+  background: transparent; cursor: pointer;
+  transition: background var(--trans), border-color var(--trans);
+}
+.size-preset-btn:hover { background: var(--surface3); border-color: var(--border-hi); }
+.size-preset-btn.active { background: var(--primary-dim); border-color: var(--primary); }
+.size-dot {
+  display: block;
+  width: var(--d); height: var(--d);
+  border-radius: 50%;
+  background: var(--text-2);
+}
+.size-preset-btn.active .size-dot { background: var(--primary); }
+
+/* Option rows (pressure, blend, fill…) */
+.opt-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.opt-label {
+  font-size: .75rem; color: var(--text-2); flex-shrink: 0;
+}
+.chip-group {
+  display: flex; gap: 4px;
+}
+.chip {
+  padding: 3px 9px;
+  font-size: .72rem; font-weight: 600;
+  border: 1.5px solid var(--border-mid);
+  border-radius: var(--radius-pill);
+  background: transparent; cursor: pointer; color: var(--text-3);
+  transition: all var(--trans);
+}
+.chip:hover { border-color: var(--border-hi); color: var(--text); }
+.chip.active { background: var(--primary-dim); border-color: var(--primary); color: var(--primary); }
+
+/* Tool-specific sections (shown/hidden by JS) */
+.tool-opt { display: none; }
+.tool-opt.visible { display: block; }
+
 .popup-hr { border: none; border-top: 1px solid var(--border-mid); margin: 10px 0; }
-.popup-section { }
+.popup-section { min-height: 0; }
 .popup-label {
   display: block; font-size: .68rem; font-weight: 700; color: var(--text-3);
-  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px;
+  text-transform: uppercase; letter-spacing: .06em; margin-bottom: 7px;
 }
 .popup-row { display: flex; align-items: center; gap: 8px; }
 .slider-h { flex: 1; accent-color: var(--primary); cursor: pointer; }
@@ -783,7 +836,7 @@ a:hover      { text-decoration: underline; }
 /* Hidden legacy controls (now in popup) */
 .color-preview-wrap, .width-ctrl, .width-val, .opacity-ctrl { display: none; }
 
-/* Quick colour preset buttons (3 always-visible swatches in the toolbox) */
+/* ── Quick colour preset buttons ───────────────────────────── */
 .color-preset-dot {
   display: block;
   width: 18px; height: 18px; border-radius: 50%;
@@ -792,14 +845,122 @@ a:hover      { text-decoration: underline; }
   transition: transform var(--trans), border-color var(--trans), box-shadow var(--trans);
   pointer-events: none;
 }
-.color-preset-btn:hover .color-preset-dot {
-  transform: scale(1.15);
-  border-color: var(--text-2);
-}
+.color-preset-btn:hover .color-preset-dot { transform: scale(1.15); border-color: var(--text-2); }
 .color-preset-btn.active .color-preset-dot {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary), 0 2px 6px rgba(0,0,0,.35);
+  box-shadow: 0 0 0 2.5px var(--primary), 0 2px 6px rgba(0,0,0,.35);
 }
+
+/* ── Quick thickness preset buttons ─────────────────────────── */
+.thickness-preset-btn {
+  width: 36px; height: 38px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--trans);
+  position: relative;
+}
+.thickness-preset-btn:hover { background: var(--surface3); }
+.thickness-preset-btn.active { background: var(--accent-glow); }
+.thickness-preset-dot {
+  display: block; border-radius: 50%;
+  background: var(--text-2);
+  transition: transform var(--trans), background var(--trans);
+  pointer-events: none;
+}
+.thickness-preset-btn:hover .thickness-preset-dot { background: var(--text); transform: scale(1.1); }
+.thickness-preset-btn.active .thickness-preset-dot { background: var(--primary); }
+
+/* ── Preset bubble ───────────────────────────────────────────── */
+.preset-bubble {
+  position: fixed;
+  z-index: 300;
+  background: var(--surface);
+  border: 1px solid var(--border-mid);
+  border-radius: 14px;
+  box-shadow: 0 16px 48px rgba(0,0,0,.65), 0 4px 12px rgba(0,0,0,.3);
+  width: 210px;
+  padding: 14px;
+  transform-origin: top center;
+  animation: bubblePop .18s cubic-bezier(.34,1.4,.64,1) forwards;
+}
+@keyframes bubblePop {
+  from { opacity: 0; transform: scale(.88) translateY(-6px); }
+  to   { opacity: 1; transform: scale(1)  translateY(0); }
+}
+.preset-bubble-arrow {
+  position: absolute;
+  top: -7px; left: 50%; transform: translateX(-50%);
+  width: 14px; height: 7px; overflow: hidden;
+}
+.preset-bubble-arrow::before {
+  content: '';
+  position: absolute;
+  top: 2px; left: 0;
+  width: 14px; height: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border-mid);
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+
+/* Color content */
+.pb-color-swatch-wrap {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 8px;
+}
+.pb-color-swatch {
+  width: 52px; height: 52px; border-radius: 10px; flex-shrink: 0;
+  border: 2px solid var(--border-hi);
+  box-shadow: 0 4px 12px rgba(0,0,0,.3);
+}
+.pb-change-btn {
+  flex: 1; display: flex; align-items: center; gap: 6px;
+  padding: 7px 10px;
+  background: var(--surface3); border: 1px solid var(--border-mid);
+  border-radius: var(--radius-sm); cursor: pointer;
+  font-size: .78rem; font-weight: 600; color: var(--text-2);
+  transition: background var(--trans), color var(--trans);
+}
+.pb-change-btn:hover { background: var(--surface4); color: var(--text); }
+.pb-hex {
+  font-size: .7rem; font-family: 'SF Mono', ui-monospace, monospace;
+  color: var(--text-3); letter-spacing: .05em;
+}
+
+/* Thickness content */
+.pb-stroke-preview {
+  display: block; width: 100%; height: 36px;
+  border-radius: var(--radius-xs);
+  background: var(--surface3);
+  margin-bottom: 10px;
+}
+.pb-slider-row {
+  display: flex; align-items: center; gap: 7px;
+}
+.pb-slider-row input[type=range] { flex: 1; accent-color: var(--primary); cursor: pointer; }
+.pb-slider-row span {
+  font-size: .72rem; color: var(--text-3); min-width: 24px; text-align: right;
+}
+
+/* Footer buttons */
+.pb-footer {
+  display: flex; gap: 6px; margin-top: 12px;
+}
+.pb-apply, .pb-save {
+  flex: 1; padding: 6px 0;
+  font-size: .76rem; font-weight: 700; cursor: pointer;
+  border-radius: var(--radius-sm); border: 1px solid var(--border-mid);
+  transition: background var(--trans), color var(--trans);
+}
+.pb-apply {
+  background: var(--primary); color: #fff; border-color: var(--primary);
+}
+.pb-apply:hover { background: var(--primary-h); }
+.pb-save {
+  background: var(--surface3); color: var(--text-2);
+}
+.pb-save:hover { background: var(--surface4); color: var(--text); }
 
 /* Export button group */
 .export-btn-group {
